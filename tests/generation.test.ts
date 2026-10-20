@@ -133,6 +133,112 @@ describe("model calls", () => {
     expect(result.usage).toEqual({ inputTokens: 1200, outputTokens: 800 });
   });
 
+  it("requests a response that follows the explanation schema", async () => {
+    let request: Record<string, unknown> | undefined;
+    const ai = {
+      run: async (_model: string, input: Record<string, unknown>) => {
+        request = input;
+        return {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: { role: "assistant", content: JSON.stringify(explanation) },
+            },
+          ],
+        };
+      },
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.ok).toBe(true);
+    const format = request?.response_format as
+      | { type?: string; json_schema?: { properties?: Record<string, unknown> } }
+      | undefined;
+    expect(format?.type).toBe("json_schema");
+    expect(format?.json_schema?.properties?.sections).toBeTruthy();
+  });
+
+  it("reads OpenAI-style chat completion choices", async () => {
+    const ai = {
+      run: async () => ({
+        choices: [
+          {
+            finish_reason: "stop",
+            message: { role: "assistant", content: JSON.stringify(explanation) },
+          },
+        ],
+        usage: { prompt_tokens: 1200, completion_tokens: 800 },
+      }),
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.ok).toBe(true);
+    expect(result.explanation?.contextHeadline).toBe(explanation.contextHeadline);
+    expect(result.usage).toEqual({ inputTokens: 1200, outputTokens: 800 });
+  });
+
+  it("unwraps a chat completion nested under response without throwing", async () => {
+    const ai = {
+      run: async () => ({
+        response: {
+          choices: [
+            {
+              finish_reason: "stop",
+              message: { role: "assistant", content: JSON.stringify(explanation) },
+            },
+          ],
+          usage: { prompt_tokens: 900, completion_tokens: 700 },
+        },
+      }),
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.ok).toBe(true);
+    expect(result.explanation?.contextHeadline).toBe(explanation.contextHeadline);
+    expect(result.usage).toEqual({ inputTokens: 900, outputTokens: 700 });
+  });
+
+  it("reports reasoning-only output without throwing", async () => {
+    const ai = {
+      run: async () => ({
+        choices: [
+          {
+            finish_reason: "length",
+            message: {
+              role: "assistant",
+              content: null,
+              reasoning_content: "The source describes a cache hierarchy. I should explain",
+            },
+          },
+        ],
+      }),
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.ok).toBe(false);
+    expect(result.issues[0]?.message).toMatch(/reasoning|output budget/i);
+  });
+
+  it("surfaces a token-limit truncation", async () => {
+    const ai = {
+      run: async () => ({
+        choices: [
+          {
+            finish_reason: "length",
+            message: {
+              role: "assistant",
+              content: '{"schemaVersion":"1","contextHeadline":"A partial answer"',
+            },
+          },
+        ],
+      }),
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((issue) => /token limit/i.test(issue.message))).toBe(true);
+  });
+
   it("rejects malformed model output without throwing", async () => {
     const ai = {
       run: async () => ({ response: '{"contextHeadline": "short"' }),

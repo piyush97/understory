@@ -1,11 +1,14 @@
 import { TOPIC_IDS } from "../content/topics";
 import {
+  explanationSchema,
   validateExplanation,
   type Block,
   type Explanation,
   type ValidationIssue,
 } from "../domain/explanation";
 import { buildGenerationMessages, type GenerationMaterial } from "./prompt";
+
+const EXPLANATION_JSON_SCHEMA = explanationSchema.toJSONSchema();
 
 export type GenerationAttempt = {
   ok: boolean;
@@ -34,33 +37,57 @@ export async function attemptGeneration(
 
   const response = (await ai.run(model, {
     messages,
-    max_tokens: 4_096,
+    max_tokens: 8_192,
     temperature: 0.35,
-  })) as {
-    response?: string;
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
-  };
+    response_format: { type: "json_schema", json_schema: EXPLANATION_JSON_SCHEMA },
+  })) as unknown;
 
-  const rawText = response.response ?? "";
+  const output = readModelOutput(response);
+  const rawText = output.text;
+  if (rawText.trim().length === 0) {
+    return {
+      ok: false,
+      explanation: null,
+      issues: [{ path: "(root)", message: emptyOutputMessage(output) }],
+      rawText,
+      usage: toTokenUsage(output.usage),
+    };
+  }
+
   const parsed = extractJsonObject(rawText);
   if (!parsed) {
     return {
       ok: false,
       explanation: null,
-      issues: [{ path: "(root)", message: "Model did not return a parseable JSON object" }],
+      issues: withFinishIssue(
+        [{ path: "(root)", message: "Model did not return a parseable JSON object" }],
+        output.finishReason,
+      ),
       rawText,
-      usage: tokenUsage(response),
+      usage: toTokenUsage(output.usage),
     };
   }
 
   const validation = validateExplanation(parsed);
   if (!validation.ok) {
-    return { ok: false, explanation: null, issues: validation.issues, rawText, usage: tokenUsage(response) };
+    return {
+      ok: false,
+      explanation: null,
+      issues: withFinishIssue(validation.issues, output.finishReason),
+      rawText,
+      usage: toTokenUsage(output.usage),
+    };
   }
 
   const semanticIssues = checkEditorialRules(validation.value, material);
   if (semanticIssues.length > 0) {
-    return { ok: false, explanation: null, issues: semanticIssues, rawText, usage: tokenUsage(response) };
+    return {
+      ok: false,
+      explanation: null,
+      issues: semanticIssues,
+      rawText,
+      usage: toTokenUsage(output.usage),
+    };
   }
 
   return {
@@ -68,7 +95,7 @@ export async function attemptGeneration(
     explanation: finalizeExplanation(validation.value),
     issues: [],
     rawText,
-    usage: tokenUsage(response),
+    usage: toTokenUsage(output.usage),
   };
 }
 
@@ -182,12 +209,168 @@ export function extractJsonObject(raw: string): unknown {
   }
 }
 
-function tokenUsage(response: {
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
-}): { inputTokens: number | null; outputTokens: number | null } | null {
-  if (!response.usage) return null;
+type ModelUsage = { prompt_tokens?: number; completion_tokens?: number };
+
+type ModelOutput = {
+  text: string;
+  reasoning: string;
+  finishReason: string | null;
+  usage: ModelUsage | null;
+};
+
+function emptyModelOutput(): ModelOutput {
+  return { text: "", reasoning: "", finishReason: null, usage: null };
+}
+
+function readModelOutput(value: unknown, depth = 0): ModelOutput {
+  if (typeof value === "string") {
+    return { text: value, reasoning: "", finishReason: null, usage: null };
+  }
+  if (depth > 6) return emptyModelOutput();
+
+  const record = asRecord(value);
+  if (!record) return emptyModelOutput();
+
+  const usage = readUsage(record.usage);
+  const finishReason = firstString(record.finish_reason, record.stop_reason);
+
+  if (typeof record.response === "string") {
+    return { text: record.response, reasoning: "", finishReason, usage };
+  }
+
+  if (Array.isArray(record.choices)) {
+    let reasoning = "";
+    let choiceFinishReason = finishReason;
+    for (const choice of record.choices) {
+      const choiceRecord = asRecord(choice);
+      if (!choiceRecord) continue;
+      choiceFinishReason = firstString(choiceRecord.finish_reason, choiceFinishReason);
+
+      const message = asRecord(choiceRecord.message);
+      if (message) {
+        const reasoningText = firstString(message.reasoning_content, message.reasoning);
+        if (reasoningText) reasoning = reasoningText;
+        const text = contentText(message.content);
+        if (text.trim()) {
+          return { text, reasoning, finishReason: choiceFinishReason, usage };
+        }
+      }
+
+      const completionText = contentText(choiceRecord.text);
+      if (completionText.trim()) {
+        return { text: completionText, reasoning, finishReason: choiceFinishReason, usage };
+      }
+    }
+    return { text: "", reasoning, finishReason: choiceFinishReason, usage };
+  }
+
+  const nestedMessage = asRecord(record.message);
+  if (nestedMessage) {
+    const reasoning = firstString(nestedMessage.reasoning_content, nestedMessage.reasoning);
+    const text = contentText(nestedMessage.content);
+    if (text.trim()) {
+      return { text, reasoning, finishReason, usage };
+    }
+    return { text: "", reasoning, finishReason, usage };
+  }
+
+  if (isRecord(record.response)) {
+    const nested = readModelOutput(record.response, depth + 1);
+    const mergedUsage = usage ?? nested.usage;
+    if (nested.text.trim() || nested.reasoning) {
+      return { ...nested, usage: mergedUsage };
+    }
+    if (!looksLikeEnvelope(record.response)) {
+      return {
+        text: JSON.stringify(record.response),
+        reasoning: "",
+        finishReason,
+        usage: mergedUsage,
+      };
+    }
+    return { text: "", reasoning: nested.reasoning, finishReason: nested.finishReason, usage: mergedUsage };
+  }
+
+  if (typeof record.text === "string") {
+    return { text: record.text, reasoning: "", finishReason, usage };
+  }
+
+  return { text: "", reasoning: "", finishReason, usage };
+}
+
+function looksLikeEnvelope(value: Record<string, unknown>): boolean {
+  return "choices" in value || "message" in value || "response" in value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return asRecord(value) !== null;
+}
+
+function contentText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((part) => {
+        if (typeof part === "string") return part;
+        const partRecord = asRecord(part);
+        return partRecord && typeof partRecord.text === "string" ? partRecord.text : "";
+      })
+      .join("");
+  }
+  const record = asRecord(value);
+  return record && typeof record.text === "string" ? record.text : "";
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return "";
+}
+
+function readUsage(value: unknown): ModelUsage | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const promptTokens = typeof record.prompt_tokens === "number" ? record.prompt_tokens : undefined;
+  const completionTokens =
+    typeof record.completion_tokens === "number" ? record.completion_tokens : undefined;
+  if (promptTokens === undefined && completionTokens === undefined) return null;
+  return { prompt_tokens: promptTokens, completion_tokens: completionTokens };
+}
+
+function withFinishIssue(issues: ValidationIssue[], finishReason: string | null): ValidationIssue[] {
+  if (finishReason !== "length") return issues;
+  return [
+    {
+      path: "(root)",
+      message: "Model output hit the token limit before the JSON was complete; retry with a larger max_tokens.",
+    },
+    ...issues,
+  ];
+}
+
+function emptyOutputMessage(output: ModelOutput): string {
+  if (output.reasoning.trim().length > 0) {
+    return "Model spent its output budget on reasoning before returning JSON; increase max_tokens or disable reasoning.";
+  }
+  if (output.finishReason === "length") {
+    return "Model output was truncated before returning JSON; increase max_tokens.";
+  }
+  return "Model did not return any text.";
+}
+
+function toTokenUsage(
+  usage: ModelUsage | null,
+): { inputTokens: number | null; outputTokens: number | null } | null {
+  if (!usage) return null;
   return {
-    inputTokens: response.usage.prompt_tokens ?? null,
-    outputTokens: response.usage.completion_tokens ?? null,
+    inputTokens: usage.prompt_tokens ?? null,
+    outputTokens: usage.completion_tokens ?? null,
   };
 }
