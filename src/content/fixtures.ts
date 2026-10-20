@@ -1,5 +1,6 @@
 import type { Block, Explanation, Inline } from "../domain/explanation";
 import type { SourceBlock } from "../domain/source";
+import { NEW_FIXTURES } from "./fixtures-2026-10-20";
 
 const r = (text: string, cite?: string, extra: Partial<Inline> = {}): Inline => ({
   text,
@@ -389,14 +390,13 @@ const cloudflare: FixtureArticle = {
           "Cloudflare: Cutting our inference bill by 68% by being obsessive about optimization",
         url: cloudflareUrl,
         note: "Published 19 October 2026. Cost, cache, tooling, and quality figures come from this post.",
-        evidenceIds: ["b1", "b2", "b3", "b4", "b5", "b6"],
+        evidenceIds: ["b1", "b2", "b3"],
       },
       {
         id: "s2",
         label: "Anthropic: Prompt caching",
         url: "https://docs.claude.com/en/docs/build-with-claude/prompt-caching",
         note: "Background on prefix caching, cache writes, reads, and the five-minute default lifetime.",
-        evidenceIds: ["b2"],
       },
       {
         id: "s3",
@@ -618,7 +618,7 @@ const tailscale: FixtureArticle = {
         label: "Tailscale: MagicRoute, routing without physical routers",
         url: tailscaleUrl,
         note: "Published 19 October 2026. Quotes and product details come from this post.",
-        evidenceIds: ["b1", "b2", "b3", "b4", "b5"],
+        evidenceIds: ["b1", "b2"],
       },
       {
         id: "s2",
@@ -874,7 +874,7 @@ const github: FixtureArticle = {
           "GitHub: From 2,500 requests to 24, rebuilding star history without the stargazers",
         url: githubUrl,
         note: "Published 14 October 2026. Request counts, query plans, and limits come from this post.",
-        evidenceIds: ["b1", "b2", "b3", "b4", "b5", "b6"],
+        evidenceIds: ["b1", "b2", "b3"],
       },
       {
         id: "s2",
@@ -1096,7 +1096,7 @@ const lemire: FixtureArticle = {
           "Daniel Lemire: Decoding base64 in Python at 10 gigabytes per second",
         url: lemireUrl,
         note: "Published 17 October 2026. Benchmark details and performance figures come from this post.",
-        evidenceIds: ["b1", "b2", "b3", "b4", "b5"],
+        evidenceIds: ["b1", "b2", "b3"],
       },
       {
         id: "s2",
@@ -1213,5 +1213,6 @@ export const FIXTURE_ARTICLES: FixtureArticle[] = [
   tailscale,
   github,
   lemire,
+  ...NEW_FIXTURES,
   ...pending,
 ];
