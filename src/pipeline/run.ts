@@ -27,12 +27,14 @@ import {
   recordBudgetUsage,
   releaseBudgetReservation,
   reserveBudget,
+  renewJobLease,
   saveSnapshot,
   setArticleStatus,
   setMeta,
   upsertSource,
 } from "../infrastructure/db";
 import { dailyNeuronBudget, type Bindings, type QueueMessage } from "../shared/env";
+import { fetchPublicText } from "../shared/fetch";
 import { parseDiscoveryHtml } from "./discovery";
 import { extractArticle, fetchArticlePage, toSnapshot } from "./extract";
 import { attemptGeneration } from "./generate";
@@ -55,16 +57,14 @@ export async function runDiscovery(env: Bindings, reason: string): Promise<RunRe
   const startedAt = new Date().toISOString();
   const discoveryUrl = env.DISCOVERY_URL ?? "https://engineeringblogs.xyz/";
 
-  const response = await fetch(discoveryUrl, {
+  const { text: html } = await fetchPublicText(discoveryUrl, {
+    maxBytes: 700_000,
+    timeoutMs: 20_000,
     headers: {
       "User-Agent": `UnderstoryBot/0.1 (+${env.SITE_URL}/about)`,
       Accept: "text/html",
     },
-    signal: AbortSignal.timeout(20_000),
   });
-  if (!response.ok) throw new Error(`Discovery page responded ${response.status}`);
-
-  const html = (await response.text()).slice(0, 700_000);
   const now = Date.now();
   const cutoff = now - MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
   const posts = parseDiscoveryHtml(html)
@@ -83,6 +83,10 @@ export async function runDiscovery(env: Bindings, reason: string): Promise<RunRe
 
     const existing = await findArticleByUrl(env.DB, post.url);
     if (existing) {
+      if (existing.status === "discovered") {
+        await createJob(env.DB, { id: `job_extract_${existing.id}`, kind: "extract", articleId: existing.id,
+          idempotencyKey: `extract:${existing.id}`, payload: { reason } });
+      }
       skipped += 1;
       continue;
     }
@@ -130,14 +134,7 @@ export async function runDiscovery(env: Bindings, reason: string): Promise<RunRe
     }
 
     inserted += 1;
-    const jobId = `job_${crypto.randomUUID()}`;
-    await createJob(env.DB, {
-      id: jobId,
-      kind: "extract",
-      articleId,
-      idempotencyKey: `extract:${articleId}`,
-      payload: { reason },
-    });
+    const jobId = `job_extract_${articleId}`;
 
     try {
       await env.PIPELINE_QUEUE.send({ kind: "job", jobId });
@@ -167,14 +164,15 @@ async function uniqueSlug(env: Bindings, title: string, url: string): Promise<st
   return `${base}-${hash.slice(0, 6)}`;
 }
 
-export async function runExtractJob(env: Bindings, articleId: string): Promise<RunResult> {
-  const article = await getArticleRow(env.DB, articleId);
+export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult> {
+  if (!job.articleId) return { ok: false, detail: "Extract job has no article." };
+  const article = await getArticleRow(env.DB, job.articleId);
   if (!article) return { ok: false, detail: "Article no longer exists." };
   if (article.status === "published" || article.status === "review") {
     return { ok: true, detail: "Article is already past extraction." };
   }
 
-  await setArticleStatus(env.DB, article.id, "extracting");
+  await setArticleStatus(env.DB, article.id, "extracting", null, job);
   try {
     const fetched = await fetchArticlePage(
       article.canonicalUrl,
@@ -187,6 +185,7 @@ export async function runExtractJob(env: Bindings, articleId: string): Promise<R
         article.id,
         "skipped",
         `Source page yielded ${extracted.wordCount} words, below the ${MIN_SOURCE_WORDS}-word floor.`,
+        job,
       );
       return { ok: true, detail: `Skipped thin source (${extracted.wordCount} words).` };
     }
@@ -217,10 +216,10 @@ export async function runExtractJob(env: Bindings, articleId: string): Promise<R
         fetchedAt: parsed.data.fetchedAt,
         finalUrl: fetched.finalUrl,
         httpStatus: fetched.status,
-      });
+      }, job);
     }
 
-    await setArticleStatus(env.DB, article.id, "generating");
+    await setArticleStatus(env.DB, article.id, "generating", null, job);
     const jobId = `job_${crypto.randomUUID()}`;
     await createJob(env.DB, {
       id: jobId,
@@ -232,7 +231,7 @@ export async function runExtractJob(env: Bindings, articleId: string): Promise<R
         links: extracted.links,
         finalUrl: fetched.finalUrl,
       },
-    });
+    }, job);
 
     try {
       await env.PIPELINE_QUEUE.send({ kind: "job", jobId });
@@ -247,7 +246,7 @@ export async function runExtractJob(env: Bindings, articleId: string): Promise<R
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await setArticleStatus(env.DB, article.id, "failed", message.slice(0, 500));
+    await setArticleStatus(env.DB, article.id, "failed", message.slice(0, 500), job);
     throw error;
   }
 }
@@ -265,7 +264,7 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   if (!snapshotId) return { ok: false, detail: "Generate job has no snapshot id." };
 
   const snapshot = await getSnapshotById(env.DB, snapshotId);
-  if (!snapshot) return { ok: false, detail: "Snapshot no longer exists." };
+  if (!snapshot || snapshot.articleId !== article.id) return { ok: false, detail: "Snapshot no longer exists for this article." };
 
   const model = env.AI_MODEL ?? "@cf/qwen/qwen3-30b-a3b-fp8";
   const existingRevision = await findRevisionKey(env.DB, {
@@ -276,9 +275,9 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
     schemaVersion: SCHEMA_VERSION,
   });
   if (existingRevision) {
-    await setArticleStatus(env.DB, article.id, "review");
-    await completeJob(env.DB, job.id, job.leaseToken ?? "");
-    return { ok: true, detail: "Revision already exists for this snapshot." };
+    if (existingRevision.status === "draft") await setArticleStatus(env.DB, article.id, "review", null, job);
+    else if (existingRevision.status === "rejected") await setArticleStatus(env.DB, article.id, "failed", "Revision was rejected; generation key is already consumed.", job);
+    return { ok: true, detail: `Revision already exists for this snapshot (${existingRevision.status}).` };
   }
 
   const links = Array.isArray(payload.links)
@@ -322,6 +321,7 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   let generation = null as Awaited<ReturnType<typeof attemptGeneration>> | null;
 
   while (attempt <= 2) {
+    if (!await renewJobLease(env.DB, job)) return { ok: false, detail: "Job lease lost." };
     const reserved = await reserveBudget(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT, dailyBudget);
     if (!reserved) {
       await deferJob(
@@ -352,7 +352,7 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   if (!generation || !generation.ok || !generation.explanation) {
     const issues = generation?.issues ?? [{ path: "(root)", message: "No generation result" }];
     const message = issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ").slice(0, 700);
-    await setArticleStatus(env.DB, article.id, "failed", message);
+    await setArticleStatus(env.DB, article.id, "failed", message, job);
     await failJob(env.DB, job, message, { terminal: job.attempts >= 3 });
     return { ok: false, detail: `Generation rejected: ${message}` };
   }
@@ -381,11 +381,13 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
     modelId: model,
     promptVersion: PROMPT_VERSION,
     schemaVersion: SCHEMA_VERSION,
-  });
+  }, job);
 
-  await setArticleStatus(env.DB, article.id, "review");
-  await completeJob(env.DB, job.id, job.leaseToken ?? "");
-
+  if (inserted) await setArticleStatus(env.DB, article.id, "review", null, job);
+  else {
+    const revision = await findRevisionKey(env.DB, { articleId: article.id, snapshotId, modelId: model, promptVersion: PROMPT_VERSION, schemaVersion: SCHEMA_VERSION });
+    if (revision?.status === "draft") await setArticleStatus(env.DB, article.id, "review", null, job);
+  }
   return {
     ok: true,
     detail: inserted
@@ -395,14 +397,22 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   };
 }
 
-export async function processJob(env: Bindings, jobId: string, leaseSeconds = 240): Promise<RunResult> {
+export async function processJob(env: Bindings, jobId: string, leaseSeconds = 120): Promise<RunResult> {
   const leaseToken = crypto.randomUUID();
   const job = await claimJob(env.DB, jobId, leaseToken, leaseSeconds);
-  if (!job) return { ok: true, detail: "Job is already leased or complete." };
+  if (!job) return { ok: true, detail: "Job is not claimable (leased, complete, or not due)." };
+
+  let renewal = Promise.resolve();
+  const heartbeat = setInterval(() => {
+    renewal = renewal.then(async () => {
+      // A failed renewal must never revive an expired/replaced lease; writes remain fenced.
+      if (!await renewJobLease(env.DB, job, leaseSeconds)) clearInterval(heartbeat);
+    }).catch(() => { clearInterval(heartbeat); });
+  }, Math.min(30_000, leaseSeconds * 1000 / 3));
 
   try {
     let result: RunResult;
-    if (job.kind === "extract" && job.articleId) result = await runExtractJob(env, job.articleId);
+    if (job.kind === "extract" && job.articleId) result = await runExtractJob(env, job);
     else if (job.kind === "generate") result = await runGenerateJob(env, job);
     else if (job.kind === "discover") result = await runDiscovery(env, "job");
     else result = { ok: false, detail: `Unknown or malformed job kind: ${job.kind}` };
@@ -414,6 +424,9 @@ export async function processJob(env: Bindings, jobId: string, leaseSeconds = 24
     const message = error instanceof Error ? error.message : String(error);
     await failJob(env.DB, job, message, { terminal: job.attempts >= 3 });
     return { ok: false, detail: message };
+  } finally {
+    clearInterval(heartbeat);
+    await renewal;
   }
 }
 
