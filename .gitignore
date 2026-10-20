@@ -1,0 +1,10 @@
+node_modules/
+.wrangler/
+.tmp/
+.dev.vars
+.env
+.DS_Store
+*.log
+coverage/
+.vercel/
+.impeccable/

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-label="Understory — engineering blogs, explained">
+  <defs>
+    <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+      <path d="M30 0H0V30" fill="none" stroke="#1c1c19" stroke-opacity="0.05" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0l8 4-8 4z" fill="#46463f"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="630" fill="#f4f2ec"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+  <rect x="60" y="58" width="1080" height="514" fill="none" stroke="#1c1c19" stroke-width="2"/>
+  <rect x="60" y="58" width="1080" height="8" fill="#1c1c19"/>
+  <rect x="84" y="96" width="12" height="12" fill="#c5432d"/>
+  <text x="108" y="107" font-family="Consolas, monospace" font-size="14" letter-spacing="3" fill="#1c1c19">UNDERSTORY / FIELD NOTES</text>
+  <text x="84" y="238" font-family="Georgia, serif" font-size="78" fill="#1c1c19">Engineering blogs,</text>
+  <text x="84" y="320" font-family="Georgia, serif" font-size="78" fill="#1c1c19">explained.</text>
+  <text x="86" y="382" font-family="Consolas, monospace" font-size="16" letter-spacing="2" fill="#6c6c62">CONTEXT / MECHANISM / DIAGRAM / SOURCES</text>
+
+  <g stroke="#46463f" stroke-width="1.4" fill="none">
+    <path d="M838 291h40" marker-end="url(#arrow)"/>
+    <path d="M956 328v96" marker-end="url(#arrow)"/>
+    <path d="M878 461h-40" marker-end="url(#arrow)"/>
+  </g>
+  <g fill="#fbfaf6" stroke="#1c1c19" stroke-width="1.6">
+    <rect x="682" y="254" width="156" height="74"/>
+    <rect x="878" y="254" width="156" height="74"/>
+    <rect x="682" y="424" width="156" height="74"/>
+    <rect x="878" y="424" width="156" height="74"/>
+  </g>
+  <g font-family="Consolas, monospace" font-size="13" fill="#1c1c19">
+    <text x="698" y="284">DISCOVER</text>
+    <text x="698" y="304" fill="#6c6c62" font-size="10">engineeringblogs.xyz</text>
+    <text x="894" y="284">EXTRACT</text>
+    <text x="894" y="304" fill="#6c6c62" font-size="10">source snapshot</text>
+    <text x="894" y="454">DRAFT</text>
+    <text x="894" y="474" fill="#6c6c62" font-size="10">bounded model call</text>
+    <text x="698" y="454">REVIEW</text>
+    <text x="698" y="474" fill="#6c6c62" font-size="10">a person decides</text>
+  </g>
+  <rect x="60" y="572" width="1080" height="1" fill="#8d8a80"/>
+  <text x="84" y="606" font-family="Consolas, monospace" font-size="12" letter-spacing="2" fill="#6c6c62">READ THE MECHANISM, NOT THE ANNOUNCEMENT.</text>
+  <text x="1110" y="606" text-anchor="end" font-family="Consolas, monospace" font-size="12" letter-spacing="2" fill="#c5432d">REV 001</text>
+</svg>

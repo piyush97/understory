@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "understory-web",
+  "main": "src/web/index.ts",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/admin", "/admin/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "understory",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "PIPELINE_QUEUE",
+        "queue": "understory-jobs"
+      }
+    ]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "SITE_NAME": "Understory",
+    "SITE_URL": "https://understory.example",
+    "AI_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
+    "DAILY_NEURON_BUDGET": "8000",
+    "REQUIRE_ACCESS_JWT": "false"
+  },
+  "observability": {
+    "enabled": true
+  }
+}
