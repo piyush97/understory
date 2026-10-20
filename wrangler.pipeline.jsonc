@@ -1,0 +1,50 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "understory-pipeline",
+  "main": "src/pipeline/index.ts",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "understory",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "PIPELINE_QUEUE",
+        "queue": "understory-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "understory-jobs",
+        "max_batch_size": 5,
+        "max_batch_timeout": 20,
+        "max_retries": 3,
+        "max_concurrency": 2
+      }
+    ]
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "SITE_NAME": "Understory",
+    "SITE_URL": "https://understory.example",
+    "AI_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
+    "DAILY_NEURON_BUDGET": "8000",
+    "DISCOVERY_URL": "https://engineeringblogs.xyz/",
+    "OPML_URL": "https://engineeringblogs.xyz/engblogs.opml"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

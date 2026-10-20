@@ -1,0 +1,41 @@
+{
+  "name": "understory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Engineering blogs, explained. A reading layer with context, diagrams, and sources.",
+  "scripts": {
+    "dev": "wrangler dev --config wrangler.web.jsonc --port 8790",
+    "dev:pipeline": "wrangler dev --config wrangler.pipeline.jsonc --port 8791",
+    "db:migrate": "wrangler d1 migrations apply understory --local --config wrangler.web.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply understory --remote --config wrangler.web.jsonc",
+    "db:seed": "tsx scripts/seed.ts --local",
+    "db:seed:remote": "tsx scripts/seed.ts --remote",
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run test",
+    "deploy:web": "wrangler deploy --config wrangler.web.jsonc",
+    "deploy:pipeline": "wrangler deploy --config wrangler.pipeline.jsonc",
+    "fonts": "tsx scripts/fetch-fonts.ts"
+  },
+  "dependencies": {
+    "hono": "^4.13.13",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "@types/node": "^24.10.1",
+    "linkedom": "^0.18.13",
+    "playwright": "^1.64.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "workerd@1.20261019.1": true
+  }
+}

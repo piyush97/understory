@@ -1,0 +1,489 @@
+import type { Job } from "../domain/article";
+import type { SourceBlock, SourceSnapshot } from "../domain/source";
+import {
+  articleIdFromUrl,
+  canonicalizeUrl,
+  hostOf,
+  sha256Hex,
+  slugify,
+} from "../domain/source";
+import { sourceSnapshotSchema } from "../domain/source";
+import {
+  claimJob,
+  completeJob,
+  createJob,
+  deferJob,
+  failJob,
+  findArticleBySlug,
+  findArticleByUrl,
+  findRevisionKey,
+  findSourceByHost,
+  getArticleRow,
+  getMeta,
+  getSnapshotById,
+  insertArticle,
+  insertRevision,
+  listReadyJobs,
+  recordBudgetUsage,
+  releaseBudgetReservation,
+  reserveBudget,
+  saveSnapshot,
+  setArticleStatus,
+  setMeta,
+  upsertSource,
+} from "../infrastructure/db";
+import { dailyNeuronBudget, type Bindings, type QueueMessage } from "../shared/env";
+import { parseDiscoveryHtml } from "./discovery";
+import { extractArticle, fetchArticlePage, toSnapshot } from "./extract";
+import { attemptGeneration } from "./generate";
+import { PROMPT_VERSION, SCHEMA_VERSION, type GenerationMaterial } from "./prompt";
+
+const ESTIMATED_NEURONS_PER_ATTEMPT = 500;
+const MAX_NEW_ARTICLES_PER_DISCOVERY = 6;
+const MAX_AGE_DAYS = 4;
+const MIN_SOURCE_WORDS = 220;
+const DISCOVERY_INTERVAL_MINUTES = 30;
+
+export type RunResult = {
+  ok: boolean;
+  detail: string;
+  counts?: Record<string, number>;
+  deferred?: boolean;
+};
+
+export async function runDiscovery(env: Bindings, reason: string): Promise<RunResult> {
+  const startedAt = new Date().toISOString();
+  const discoveryUrl = env.DISCOVERY_URL ?? "https://engineeringblogs.xyz/";
+
+  const response = await fetch(discoveryUrl, {
+    headers: {
+      "User-Agent": `UnderstoryBot/0.1 (+${env.SITE_URL}/about)`,
+      Accept: "text/html",
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`Discovery page responded ${response.status}`);
+
+  const html = (await response.text()).slice(0, 700_000);
+  const now = Date.now();
+  const cutoff = now - MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const posts = parseDiscoveryHtml(html)
+    .filter((post) => {
+      const published = Date.parse(post.publishedAt);
+      return Number.isFinite(published) && published >= cutoff;
+    })
+    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+
+  let inserted = 0;
+  let skipped = 0;
+  let queued = 0;
+
+  for (const post of posts) {
+    if (inserted >= MAX_NEW_ARTICLES_PER_DISCOVERY) break;
+
+    const existing = await findArticleByUrl(env.DB, post.url);
+    if (existing) {
+      skipped += 1;
+      continue;
+    }
+
+    let host: string;
+    try {
+      host = hostOf(post.sourceSiteUrl);
+    } catch {
+      continue;
+    }
+
+    let source = await findSourceByHost(env.DB, host);
+    if (!source) {
+      const sourceId = `src_${slugify(host, 48)}`;
+      await upsertSource(env.DB, {
+        id: sourceId,
+        name: post.sourceName.slice(0, 160),
+        siteUrl: post.sourceSiteUrl,
+        host,
+      });
+      source = {
+        id: sourceId,
+        name: post.sourceName,
+        siteUrl: post.sourceSiteUrl,
+        feedUrl: null,
+        host,
+        status: "active",
+      };
+    }
+
+    const articleId = await articleIdFromUrl(post.url);
+    const slug = await uniqueSlug(env, post.title, post.url);
+    const wasInserted = await insertArticle(env.DB, {
+      id: articleId,
+      sourceId: source.id,
+      canonicalUrl: post.url,
+      originalTitle: post.title,
+      publishedAt: post.publishedAt,
+      discoveredAt: startedAt,
+      slug,
+    });
+    if (!wasInserted) {
+      skipped += 1;
+      continue;
+    }
+
+    inserted += 1;
+    const jobId = `job_${crypto.randomUUID()}`;
+    await createJob(env.DB, {
+      id: jobId,
+      kind: "extract",
+      articleId,
+      idempotencyKey: `extract:${articleId}`,
+      payload: { reason },
+    });
+
+    try {
+      await env.PIPELINE_QUEUE.send({ kind: "job", jobId });
+      queued += 1;
+    } catch {
+      // The scheduled sweep will pick up ready jobs if the queue is unavailable.
+    }
+  }
+
+  await setMeta(env.DB, "last_discovery_at", startedAt);
+  await setMeta(env.DB, "last_discovery_result", `${inserted} new / ${skipped} known`);
+
+  return {
+    ok: true,
+    detail: `Discovery finished: ${inserted} new, ${skipped} known, ${queued} queued.`,
+    counts: { found: posts.length, inserted, skipped, queued },
+  };
+}
+
+async function uniqueSlug(env: Bindings, title: string, url: string): Promise<string> {
+  const base = slugify(title, 64);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = attempt === 0 ? base : `${base}-${attempt + 1}`;
+    if (!(await findArticleBySlug(env.DB, candidate))) return candidate;
+  }
+  const hash = await sha256Hex(url);
+  return `${base}-${hash.slice(0, 6)}`;
+}
+
+export async function runExtractJob(env: Bindings, articleId: string): Promise<RunResult> {
+  const article = await getArticleRow(env.DB, articleId);
+  if (!article) return { ok: false, detail: "Article no longer exists." };
+  if (article.status === "published" || article.status === "review") {
+    return { ok: true, detail: "Article is already past extraction." };
+  }
+
+  await setArticleStatus(env.DB, article.id, "extracting");
+  try {
+    const fetched = await fetchArticlePage(
+      article.canonicalUrl,
+      `UnderstoryBot/0.1 (+${env.SITE_URL}/about)`,
+    );
+    const extracted = await extractArticle(fetched.html, fetched.finalUrl);
+    if (extracted.wordCount < MIN_SOURCE_WORDS) {
+      await setArticleStatus(
+        env.DB,
+        article.id,
+        "skipped",
+        `Source page yielded ${extracted.wordCount} words, below the ${MIN_SOURCE_WORDS}-word floor.`,
+      );
+      return { ok: true, detail: `Skipped thin source (${extracted.wordCount} words).` };
+    }
+
+    const snapshot = toSnapshot(article.id, fetched.finalUrl, new Date().toISOString(), extracted);
+    const parsed = sourceSnapshotSchema.safeParse(snapshot);
+    if (!parsed.success) {
+      throw new Error(`Snapshot failed validation: ${parsed.error.issues[0]?.message ?? "unknown"}`);
+    }
+
+    const blocksJson = JSON.stringify(parsed.data.blocks);
+    const sourceHash = await sha256Hex(`${fetched.finalUrl}\n${blocksJson}`);
+    let snapshotId = `snap_${sourceHash.slice(0, 24)}`;
+    const existing = await env.DB.prepare(
+      "SELECT id FROM article_snapshots WHERE article_id = ? AND source_hash = ?",
+    )
+      .bind(article.id, sourceHash)
+      .first<{ id: string }>();
+    if (existing) snapshotId = existing.id;
+    else {
+      await saveSnapshot(env.DB, {
+        id: snapshotId,
+        articleId: article.id,
+        sourceHash,
+        blocksJson,
+        wordCount: parsed.data.wordCount,
+        extractorVersion: parsed.data.extractorVersion,
+        fetchedAt: parsed.data.fetchedAt,
+        finalUrl: fetched.finalUrl,
+        httpStatus: fetched.status,
+      });
+    }
+
+    await setArticleStatus(env.DB, article.id, "generating");
+    const jobId = `job_${crypto.randomUUID()}`;
+    await createJob(env.DB, {
+      id: jobId,
+      kind: "generate",
+      articleId: article.id,
+      idempotencyKey: `generate:${snapshotId}`,
+      payload: {
+        snapshotId,
+        links: extracted.links,
+        finalUrl: fetched.finalUrl,
+      },
+    });
+
+    try {
+      await env.PIPELINE_QUEUE.send({ kind: "job", jobId });
+    } catch {
+      // Ready-job sweep will retry.
+    }
+
+    return {
+      ok: true,
+      detail: `Extracted ${parsed.data.wordCount} words into ${parsed.data.blocks.length} blocks.`,
+      counts: { words: parsed.data.wordCount, blocks: parsed.data.blocks.length },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await setArticleStatus(env.DB, article.id, "failed", message.slice(0, 500));
+    throw error;
+  }
+}
+
+export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult> {
+  if (!env.AI) return { ok: false, detail: "Workers AI binding is not configured." };
+  if (!job.articleId) return { ok: false, detail: "Generate job has no article." };
+
+  const article = await getArticleRow(env.DB, job.articleId);
+  if (!article) return { ok: false, detail: "Article no longer exists." };
+  if (article.status === "published") return { ok: true, detail: "Article is already published." };
+
+  const payload = parsePayload(job.payloadJson);
+  const snapshotId = typeof payload.snapshotId === "string" ? payload.snapshotId : null;
+  if (!snapshotId) return { ok: false, detail: "Generate job has no snapshot id." };
+
+  const snapshot = await getSnapshotById(env.DB, snapshotId);
+  if (!snapshot) return { ok: false, detail: "Snapshot no longer exists." };
+
+  const model = env.AI_MODEL ?? "@cf/qwen/qwen3-30b-a3b-fp8";
+  const existingRevision = await findRevisionKey(env.DB, {
+    articleId: article.id,
+    snapshotId,
+    modelId: model,
+    promptVersion: PROMPT_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+  });
+  if (existingRevision) {
+    await setArticleStatus(env.DB, article.id, "review");
+    await completeJob(env.DB, job.id, job.leaseToken ?? "");
+    return { ok: true, detail: "Revision already exists for this snapshot." };
+  }
+
+  const links = Array.isArray(payload.links)
+    ? payload.links
+        .filter(
+          (link): link is { url: string; host: string } =>
+            Boolean(link) &&
+            typeof link === "object" &&
+            typeof (link as { url?: unknown }).url === "string" &&
+            typeof (link as { host?: unknown }).host === "string",
+        )
+        .slice(0, 30)
+    : [];
+
+  const material: GenerationMaterial = {
+    articleTitle: article.originalTitle,
+    articleUrl: article.canonicalUrl,
+    articlePublishedAt: article.publishedAt,
+    sourceName:
+      (
+        await env.DB.prepare("SELECT name FROM sources WHERE id = ?")
+          .bind(article.sourceId)
+          .first<{ name: string }>()
+      )?.name ?? "Engineering blog",
+    snapshot: {
+      articleId: article.id,
+      title: article.originalTitle,
+      url: article.canonicalUrl,
+      fetchedAt: new Date().toISOString(),
+      extractorVersion: "htmlrewriter-1",
+      blocks: parseBlocks(snapshot.blocksJson),
+      wordCount: snapshot.wordCount,
+    },
+    links,
+  };
+
+  const dailyBudget = dailyNeuronBudget(env.DAILY_NEURON_BUDGET);
+  const day = new Date().toISOString().slice(0, 10);
+  let attempt = 1;
+  let previous: { rawText: string; issues: Array<{ path: string; message: string }> } | null = null;
+  let generation = null as Awaited<ReturnType<typeof attemptGeneration>> | null;
+
+  while (attempt <= 2) {
+    const reserved = await reserveBudget(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT, dailyBudget);
+    if (!reserved) {
+      await deferJob(
+        env.DB,
+        { id: job.id, leaseToken: job.leaseToken },
+        nextUtcMidnight(),
+        "Daily model budget is fully reserved.",
+      );
+      return { ok: true, detail: "Deferred until the next UTC day: budget exhausted.", deferred: true };
+    }
+
+    try {
+      generation = await attemptGeneration(env.AI, model, material, previous);
+    } catch (error) {
+      // A transport or binding failure should not consume the day's budget.
+      await releaseBudgetReservation(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT);
+      throw error;
+    }
+    // The API does not expose an exact neuron count. Keep the reservation
+    // ledger conservative by recording the estimate as spent.
+    await recordBudgetUsage(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT, null);
+
+    if (generation.ok) break;
+    previous = { rawText: generation.rawText, issues: generation.issues };
+    attempt += 1;
+  }
+
+  if (!generation || !generation.ok || !generation.explanation) {
+    const issues = generation?.issues ?? [{ path: "(root)", message: "No generation result" }];
+    const message = issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ").slice(0, 700);
+    await setArticleStatus(env.DB, article.id, "failed", message);
+    await failJob(env.DB, job, message, { terminal: job.attempts >= 3 });
+    return { ok: false, detail: `Generation rejected: ${message}` };
+  }
+
+  const generatedAt = new Date().toISOString();
+  const provenance = {
+    origin: "workers-ai",
+    modelId: model,
+    promptVersion: PROMPT_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    generatedAt,
+    attempts: attempt,
+    sourceSnapshotId: snapshotId,
+    sourceHash: null,
+    usage: generation.usage,
+    materialLinks: links.map((link) => link.url),
+    editorial: "Draft only. Publication requires a human review.",
+  };
+
+  const inserted = await insertRevision(env.DB, {
+    id: `rev_${crypto.randomUUID()}`,
+    articleId: article.id,
+    snapshotId,
+    contentJson: JSON.stringify(generation.explanation),
+    provenanceJson: JSON.stringify(provenance),
+    modelId: model,
+    promptVersion: PROMPT_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+  });
+
+  await setArticleStatus(env.DB, article.id, "review");
+  await completeJob(env.DB, job.id, job.leaseToken ?? "");
+
+  return {
+    ok: true,
+    detail: inserted
+      ? `Draft ready for review: ${generation.explanation.contextHeadline}`
+      : "Draft already existed; marked job complete.",
+    counts: { attempts: attempt },
+  };
+}
+
+export async function processJob(env: Bindings, jobId: string, leaseSeconds = 240): Promise<RunResult> {
+  const leaseToken = crypto.randomUUID();
+  const job = await claimJob(env.DB, jobId, leaseToken, leaseSeconds);
+  if (!job) return { ok: true, detail: "Job is already leased or complete." };
+
+  try {
+    let result: RunResult;
+    if (job.kind === "extract" && job.articleId) result = await runExtractJob(env, job.articleId);
+    else if (job.kind === "generate") result = await runGenerateJob(env, job);
+    else if (job.kind === "discover") result = await runDiscovery(env, "job");
+    else result = { ok: false, detail: `Unknown or malformed job kind: ${job.kind}` };
+
+    if (result.ok && !result.deferred) await completeJob(env.DB, job.id, leaseToken);
+    else if (!result.ok) await failJob(env.DB, job, result.detail, { terminal: job.attempts >= 3 });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await failJob(env.DB, job, message, { terminal: job.attempts >= 3 });
+    return { ok: false, detail: message };
+  }
+}
+
+export async function handleQueueBatch(
+  env: Bindings,
+  messages: Message<QueueMessage>[],
+): Promise<void> {
+  for (const message of messages) {
+    try {
+      if (message.body.kind === "discover") await runDiscovery(env, message.body.reason ?? "queue");
+      else if (message.body.kind === "job") await processJob(env, message.body.jobId);
+      message.ack();
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      console.error(JSON.stringify({ level: "error", service: "understory-pipeline", message: messageText }));
+      message.retry({ delaySeconds: 60 });
+    }
+  }
+}
+
+export async function runScheduled(env: Bindings, now = new Date()): Promise<void> {
+  const last = await getMeta(env.DB, "last_discovery_enqueued_at");
+  const lastMs = last ? Date.parse(last) : 0;
+  const due = !Number.isFinite(lastMs) || now.getTime() - lastMs >= 10 * 60_000;
+
+  if (due) {
+    await env.PIPELINE_QUEUE.send({ kind: "discover", reason: "cron" });
+    await setMeta(env.DB, "last_discovery_enqueued_at", now.toISOString());
+  }
+
+  // Queue messages make each heavy step its own invocation. Duplicate messages
+  // are harmless because claimJob is atomic.
+  const ready = await listReadyJobs(env.DB, 3);
+  for (const job of ready) {
+    try {
+      await env.PIPELINE_QUEUE.send({ kind: "job", jobId: job.id });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          service: "understory-pipeline",
+          jobId: job.id,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+}
+
+function parsePayload(raw: string): Record<string, unknown> {
+  try {
+    const value = JSON.parse(raw);
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseBlocks(raw: string): SourceBlock[] {
+  try {
+    const value = JSON.parse(raw);
+    return Array.isArray(value) ? (value as SourceBlock[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function nextUtcMidnight(): string {
+  const now = new Date();
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 2, 0),
+  ).toISOString();
+}
