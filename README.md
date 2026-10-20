@@ -21,6 +21,26 @@ Two Workers share one D1 database:
 | `understory-web` | `src/web/index.ts` | Public pages, JSON API, RSS/sitemap, admin review surface |
 | `understory-pipeline` | `src/pipeline/index.ts` | Discovery, extraction, generation, validation, queue consumer, cron |
 
+## Architecture
+
+[![Understory system architecture](docs/architecture.png)](docs/architecture.html)
+
+Two Workers share one Cloudflare account and one D1 database. `understory-web` renders the public reading app and the private editorial desk. `understory-pipeline` consumes discovery, extraction, and generation jobs, fetches [engineeringblogs.xyz](https://engineeringblogs.xyz/) and publisher pages, calls Workers AI, and writes draft revisions to D1. A person must approve a draft before it can appear in the public index.
+
+The image above is a static export. The [interactive diagram](docs/architecture.html) supports route focus, lens, and source links; download it and open it in a browser because GitHub displays HTML files as source, not as a rendered page.
+
+## Screenshots
+
+| Index | Article |
+| --- | --- |
+| [![The Understory index](docs/screenshots/home-desktop.png)](docs/screenshots/home-desktop.png) | [![An Understory article](docs/screenshots/article-desktop.png)](docs/screenshots/article-desktop.png) |
+| **Index.** A dense feed with topic filters, a lead explainer, and the same drawing-sheet system used throughout the app. | **Article.** Context first, a one-sentence summary, TL;DR, and a calm reading column with a source record in the margin. |
+
+| Editorial review | Mobile |
+| --- | --- |
+| [![The Understory editorial desk](docs/screenshots/admin-review.png)](docs/screenshots/admin-review.png) | <a href="docs/screenshots/home-mobile.png"><img src="docs/screenshots/home-mobile.png" alt="Understory on a phone" width="300"></a> |
+| **Editorial desk.** Drafts wait for a person to approve or reject them against the source snapshot. | **Mobile.** The reading index collapses to a single column without losing the sheet hierarchy. |
+
 ## Local setup
 
 Requires Node 20+ and a Cloudflare account only for deployment. Local D1, Queues, and static assets run in Wrangler without an account.
@@ -147,6 +167,7 @@ src/content/        reviewed fixtures and the fixed topic set
 public/assets/      stylesheet, client JS, fonts, icons
 migrations/         D1 schema
 scripts/            seed and font tooling
+docs/               architecture diagram and app screenshots
 tests/              Vitest coverage
 ```
 
