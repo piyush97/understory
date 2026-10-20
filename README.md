@@ -2,7 +2,7 @@
 
 Engineering blogs, explained. Understory watches [engineeringblogs.xyz](https://engineeringblogs.xyz/), turns selected posts into reviewed explainers, and publishes a dense reading index with context, diagrams, an ELI5, trade-offs, and sources.
 
-The public side is read-only and fully server-rendered. Explanations are generated asynchronously, validated against a schema, and held in a private editorial queue until a person approves them.
+The public side is read-only and fully server-rendered. Explanations are generated asynchronously, validated against a schema, and held in an auth-gated editorial queue until a person approves them.
 
 ## Stack
 
@@ -25,7 +25,7 @@ Two Workers share one D1 database:
 
 [![Understory system architecture](docs/architecture.png)](docs/architecture.html)
 
-Two Workers share one Cloudflare account and one D1 database. `understory-web` renders the public reading app and the private editorial desk. `understory-pipeline` consumes discovery, extraction, and generation jobs, fetches [engineeringblogs.xyz](https://engineeringblogs.xyz/) and publisher pages, calls Workers AI, and writes draft revisions to D1. A person must approve a draft before it can appear in the public index.
+Two Workers share one Cloudflare account and one D1 database. `understory-web` renders the public reading app and the auth-gated editorial desk. `understory-pipeline` consumes discovery, extraction, and generation jobs, fetches [engineeringblogs.xyz](https://engineeringblogs.xyz/) and publisher pages, calls Workers AI, and writes draft revisions to D1. A person must approve a draft before it can appear in the public index.
 
 The image above is a static export. The [interactive diagram](docs/architecture.html) supports route focus, lens, and source links; download it and open it in a browser because GitHub displays HTML files as source, not as a rendered page.
 
@@ -72,7 +72,7 @@ Workers AI is not available in local Wrangler. Generation jobs will reach the bu
 
 ### Local review
 
-Open `http://localhost:8790/admin` and use the token from `.dev.vars`. The queue is empty after a fresh seed because the four fixture explainers are already published. The admin routes can be exercised with a draft revision inserted into D1.
+Open `http://localhost:8790/admin` and use the token from `.dev.vars`. The queue is empty after a fresh seed because the ten fixture explainers are already published. The admin routes can be exercised with a draft revision inserted into D1.
 
 ## Checks
 
@@ -102,12 +102,14 @@ The daily budget defaults to 8,000 neurons, with roughly 500 neurons reserved pe
 
 ## Content and editorial rules
 
-- The seed contains four published explainers based on real engineering blog posts, plus three discovered posts on the bench. The prose was written for Understory, not copied from the publishers.
+- The seed contains ten published explainers based on real engineering blog posts, plus three discovered posts on the bench. The prose was written for Understory, not copied from the publishers.
+- Source snapshots are abbreviated editorial evidence: two or three short quotations and the canonical link per source. They are not full-text copies.
 - Generated content must cite source ids. Citations that point nowhere are rejected before review.
 - Sources can only use URLs found in the extracted page or the original canonical URL. The validator rejects invented URLs.
 - Diagrams are graph JSON rendered to deterministic SVG. The model never supplies SVG or JavaScript.
 - The reader can always reach the original article. Understory does not reproduce the full text.
 - `/about` states the editorial policy in public.
+- Publisher articles are not covered by Understory's content license. See [CONTENT-LICENSE.md](CONTENT-LICENSE.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Deployment
 
@@ -166,11 +168,21 @@ src/web/            Worker entry, routes, JSX components, cache, client helpers
 src/content/        reviewed fixtures and the fixed topic set
 public/assets/      stylesheet, client JS, fonts, icons
 migrations/         D1 schema
-scripts/            seed and font tooling
+scripts/            seed tooling
 docs/               architecture diagram and app screenshots
 tests/              Vitest coverage
 ```
 
+## Contributing
+
+Issues and focused pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing the schema, the editorial pipeline, or the published fixtures. Security reports should follow [SECURITY.md](SECURITY.md), not a public issue.
+
 ## License and attribution
 
-Original articles belong to their authors and publishers. Understory links to every source it uses. The project code is private unless the repository owner says otherwise.
+Understory is open source.
+
+- **Code:** MIT. See [LICENSE](LICENSE).
+- **Original explainer prose and diagrams:** CC BY 4.0. See [CONTENT-LICENSE.md](CONTENT-LICENSE.md).
+- **Publisher articles, quotations, fonts, and trademarks:** excluded from those licenses and remain with their owners. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The project is independent and not affiliated with the publishers it covers. If you are a rights holder and believe a quotation or attribution is wrong, open an issue with the URL and the specific passage.
