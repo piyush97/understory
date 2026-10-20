@@ -25,6 +25,14 @@ import { renderError, renderNotFound } from "./routes/not-found";
 
 const app = new Hono<AppEnv>();
 
+// Before DB/rendering middleware: login, 404 and 500 responses must also be private.
+app.use("*", async (c, next) => {
+  const admin = c.req.path === "/admin" || c.req.path.startsWith("/admin/");
+  if (admin) c.header("Cache-Control", "no-store");
+  await next();
+  if (admin) c.header("Cache-Control", "no-store");
+});
+
 app.get("/health", async (c) => {
   try {
     await c.env.DB.prepare("SELECT 1").first();

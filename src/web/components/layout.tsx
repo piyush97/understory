@@ -112,7 +112,8 @@ export function Layout({
           </div>
         </header>
 
-        <main id="main">{children}</main>
+        <main id="main" tabIndex={-1}>{children}</main>
+        <p id="bookmark-status" class="bookmark-status" role="status" aria-atomic="true" />
 
         <footer class="site-footer">
           <div class="colophon">

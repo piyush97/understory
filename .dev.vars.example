@@ -1,7 +1,9 @@
-# Local development only. Never commit this file.
+# Copy to .dev.vars for local development. Never commit .dev.vars.
 ADMIN_TOKEN="dev-understory-token"
 ENVIRONMENT="development"
 SITE_URL="http://localhost:8790"
 SEED_ON_START="false"
-# Set to "true" once you have a Cloudflare Access application in front of /admin.
+# Optional Access assertion verification; the editorial token is still required.
 REQUIRE_ACCESS_JWT="false"
+# ACCESS_TEAM_DOMAIN="your-team.cloudflareaccess.com"
+# ACCESS_AUD="your-access-application-audience"

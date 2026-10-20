@@ -48,11 +48,11 @@
   --sheet: #fbfaf6;
   --ink: #1c1c19;
   --ink-2: #46463f;
-  --muted: #6c6c62;
-  --faint: #8b897f;
+  --muted: #626258;
+  --faint: #656359;
   --rule: #c9c5b9;
   --rule-strong: #8d8a80;
-  --redline: #c5432d;
+  --redline: #b23826;
   --redline-soft: #e5bdb5;
   --wash: #e7e3d8;
   --code-bg: #1b1b18;
@@ -78,10 +78,10 @@
     --ink: #eeeae0;
     --ink-2: #c7c2b6;
     --muted: #9a968b;
-    --faint: #77746b;
+    --faint: #929084;
     --rule: #3a3933;
     --rule-strong: #6d6a60;
-    --redline: #e0654e;
+    --redline: #e36d56;
     --redline-soft: #552c24;
     --wash: #25251f;
     --code-bg: #0e0e0c;
@@ -381,6 +381,23 @@ ol {
 #main {
   min-height: 50vh;
   flex: 1 0 auto;
+}
+
+.bookmark-status:not(:empty) {
+  position: fixed;
+  z-index: 20;
+  bottom: 16px;
+  left: var(--gutter);
+  right: var(--gutter);
+  width: fit-content;
+  max-width: 60ch;
+  margin: 0 auto;
+  padding: 12px 16px;
+  border: 1px solid var(--redline);
+  background: var(--sheet);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
 }
 
 .page {
@@ -695,7 +712,7 @@ html:not(.js) .js-only {
 }
 
 .topic-strip__item--active .topic-strip__count {
-  color: var(--redline-soft);
+  color: var(--paper);
 }
 
 /* Lead */
@@ -3315,12 +3332,15 @@ a.field-value {
     scroll-behavior: auto;
   }
 
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+  .page,
+  .article-page {
+    animation: none;
+  }
+
+  .button,
+  .button--primary svg,
+  .text-link svg {
+    transition: none;
   }
 }
 

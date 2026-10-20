@@ -518,50 +518,45 @@ export async function approveRevision(
 
   const now = new Date().toISOString();
   const reviewId = crypto.randomUUID();
-  await db.batch([
-    db
-      .prepare(
-        `UPDATE explanation_revisions
-         SET status = 'approved'
-         WHERE article_id = ? AND status = 'published' AND id != ?`,
-      )
-      .bind(revision.article_id, revisionId),
+  const results = await db.batch([
+    db.prepare(`INSERT INTO reviews (id, revision_id, decision, note, reviewer, created_at)
+      SELECT ?, id, 'approved', ?, ?, ? FROM explanation_revisions WHERE id = ? AND status = 'draft'`)
+      .bind(reviewId, note, reviewer, now, revisionId),
     db
       .prepare(
         `UPDATE explanation_revisions
          SET status = 'published', reviewed_at = ?, reviewed_by = ?, review_note = ?
-         WHERE id = ?`,
+          WHERE id = ? AND status = 'draft' AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
       )
-      .bind(now, reviewer, note, revisionId),
+      .bind(now, reviewer, note, revisionId, reviewId),
+    db.prepare(`UPDATE explanation_revisions SET status = 'approved'
+      WHERE article_id = ? AND status = 'published' AND id != ?
+      AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`)
+      .bind(revision.article_id, revisionId, reviewId),
     db
       .prepare(
         `UPDATE articles
          SET status = 'published', published_revision_id = ?, reading_minutes = ?,
              context_headline = ?, dek = ?, topic_id = ?, updated_at = ?
-         WHERE id = ?`,
+          WHERE id = ? AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
       )
-      .bind(revisionId, readingMinutes, contextHeadline, dek, topicId, now, revision.article_id),
-    db
-      .prepare(
-        `INSERT INTO reviews (id, revision_id, decision, note, reviewer, created_at)
-         VALUES (?, ?, 'approved', ?, ?, ?)`,
-      )
-      .bind(reviewId, revisionId, note, reviewer, now),
+      .bind(revisionId, readingMinutes, contextHeadline, dek, topicId, now, revision.article_id, reviewId),
     db
       .prepare(
         `INSERT INTO article_topics (article_id, topic_id)
-         SELECT ?, ? WHERE EXISTS (SELECT 1 FROM topics WHERE id = ?)
+          SELECT ?, ? WHERE EXISTS (SELECT 1 FROM topics WHERE id = ?)
+          AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)
          ON CONFLICT DO NOTHING`,
       )
-      .bind(revision.article_id, topicId, topicId),
+      .bind(revision.article_id, topicId, topicId, reviewId),
     db
       .prepare(
         `UPDATE meta SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
-         WHERE key = 'publication_version'`,
-      ),
+          WHERE key = 'publication_version' AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
+      ).bind(reviewId),
   ]);
 
-  return { articleId: revision.article_id, slug: revision.slug };
+  return (results[0]?.meta.changes ?? 0) > 0 ? { articleId: revision.article_id, slug: revision.slug } : null;
 }
 
 export async function rejectRevision(
@@ -571,25 +566,25 @@ export async function rejectRevision(
   note: string,
 ): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE explanation_revisions
+  const reviewId = crypto.randomUUID();
+  const results = await db.batch([
+    db.prepare(`INSERT INTO reviews (id, revision_id, decision, note, reviewer, created_at)
+      SELECT ?, id, 'rejected', ?, ?, ? FROM explanation_revisions WHERE id = ? AND status = 'draft'`)
+      .bind(reviewId, note, reviewer, now, revisionId),
+    db.prepare(
+       `UPDATE explanation_revisions
        SET status = 'rejected', reviewed_at = ?, reviewed_by = ?, review_note = ?
-       WHERE id = ? AND status = 'draft'`,
+        WHERE id = ? AND status = 'draft' AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
     )
-    .bind(now, reviewer, note, revisionId)
-    .run();
-
-  if ((result.meta?.changes ?? 0) === 0) return false;
-
-  await db
-    .prepare(
-      `INSERT INTO reviews (id, revision_id, decision, note, reviewer, created_at)
-       VALUES (?, ?, 'rejected', ?, ?, ?)`,
-    )
-    .bind(crypto.randomUUID(), revisionId, note, reviewer, now)
-    .run();
-  return true;
+    .bind(now, reviewer, note, revisionId, reviewId),
+    db.prepare(`UPDATE articles SET status = 'failed', updated_at = ?
+      WHERE status = 'review' AND published_revision_id IS NULL
+      AND id = (SELECT article_id FROM explanation_revisions WHERE id = ?)
+      AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)
+      AND NOT EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')`)
+      .bind(now, revisionId, reviewId),
+  ]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 }
 
 export async function getPublicationVersion(db: D1Database): Promise<string> {
@@ -704,8 +699,8 @@ export async function insertArticle(
     discoveredAt: string;
   },
 ): Promise<boolean> {
-  const result = await db
-    .prepare(
+  const results = await db.batch([
+    db.prepare(
       `INSERT INTO articles
         (id, source_id, canonical_url, original_title, published_at, discovered_at, author, summary, slug, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'discovered')
@@ -721,9 +716,14 @@ export async function insertArticle(
       input.author ?? null,
       input.summary ?? null,
       input.slug,
-    )
-    .run();
-  return (result.meta?.changes ?? 0) > 0;
+    ),
+    db.prepare(`INSERT INTO jobs (id, kind, article_id, payload_json, idempotency_key, next_run_at)
+      SELECT 'job_extract_' || id, 'extract', id, '{}', 'extract:' || id, ? FROM articles
+      WHERE canonical_url = ? AND status = 'discovered'
+      ON CONFLICT (idempotency_key) DO NOTHING`)
+      .bind(new Date().toISOString(), input.canonicalUrl),
+  ]);
+  return (results[0]?.meta.changes ?? 0) > 0;
 }
 
 export async function upsertSource(
@@ -748,11 +748,15 @@ export async function setArticleStatus(
   db: D1Database,
   articleId: string,
   status: Article["status"],
-  error?: string | null,
+  error: string | null,
+  lease: Job,
 ): Promise<void> {
   await db
-    .prepare("UPDATE articles SET status = ?, last_error = ?, updated_at = ? WHERE id = ?")
-    .bind(status, error ?? null, new Date().toISOString(), articleId)
+    .prepare(`UPDATE articles SET status = ?, last_error = ?, updated_at = ?
+      WHERE id = ? AND id = ? AND status != 'published' AND published_revision_id IS NULL AND ${CURRENT_LEASE_SQL}
+      ${status === "review" ? "AND EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')" : ""}
+      ${status === "failed" ? "AND NOT EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')" : ""}`)
+    .bind(status, error, new Date().toISOString(), articleId, lease.articleId, ...leaseValues(lease))
     .run();
 }
 
@@ -769,12 +773,13 @@ export async function saveSnapshot(
     finalUrl: string;
     httpStatus: number;
   },
+  lease: Job,
 ): Promise<void> {
   await db
     .prepare(
       `INSERT INTO article_snapshots
         (id, article_id, source_hash, blocks_json, word_count, extractor_version, fetched_at, final_url, http_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ? = ? AND ${CURRENT_LEASE_SQL}
        ON CONFLICT (article_id, source_hash) DO NOTHING`,
     )
     .bind(
@@ -787,6 +792,7 @@ export async function saveSnapshot(
       input.fetchedAt,
       input.finalUrl,
       input.httpStatus,
+      input.articleId, lease.articleId, ...leaseValues(lease),
     )
     .run();
 }
@@ -863,12 +869,13 @@ export async function insertRevision(
     promptVersion: string;
     schemaVersion: string;
   },
+  lease: Job,
 ): Promise<boolean> {
   const result = await db
     .prepare(
       `INSERT INTO explanation_revisions
         (id, article_id, snapshot_id, status, content_json, provenance_json, model_id, prompt_version, schema_version)
-       VALUES (?, ?, ?, 'draft', ?, ?, ?, ?, ?)
+       SELECT ?, ?, ?, 'draft', ?, ?, ?, ?, ? WHERE ? = ? AND ${CURRENT_LEASE_SQL}
        ON CONFLICT (article_id, snapshot_id, model_id, prompt_version, schema_version) DO NOTHING`,
     )
     .bind(
@@ -880,6 +887,7 @@ export async function insertRevision(
       input.modelId,
       input.promptVersion,
       input.schemaVersion,
+      input.articleId, lease.articleId, ...leaseValues(lease),
     )
     .run();
   return (result.meta?.changes ?? 0) > 0;
@@ -921,11 +929,12 @@ export async function createJob(
     idempotencyKey: string;
     nextRunAt?: string;
   },
+  lease?: Job,
 ): Promise<void> {
   await db
     .prepare(
       `INSERT INTO jobs (id, kind, article_id, payload_json, idempotency_key, next_run_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+       SELECT ?, ?, ?, ?, ?, ? WHERE ${lease ? `? = ? AND ${CURRENT_LEASE_SQL}` : "1"}
        ON CONFLICT (idempotency_key) DO NOTHING`,
     )
     .bind(
@@ -935,6 +944,7 @@ export async function createJob(
       JSON.stringify(input.payload ?? {}),
       input.idempotencyKey,
       input.nextRunAt ?? new Date().toISOString(),
+      ...(lease ? [input.articleId, lease.articleId, ...leaseValues(lease)] : []),
     )
     .run();
 }
@@ -944,7 +954,7 @@ export async function listReadyJobs(db: D1Database, limit = 10): Promise<Job[]> 
     .prepare(
       `SELECT * FROM jobs
        WHERE (state = 'pending' AND next_run_at <= ?)
-          OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?)
+           OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
        ORDER BY next_run_at ASC
        LIMIT ?`,
     )
@@ -990,10 +1000,10 @@ export async function claimJob(
     .prepare(
       `UPDATE jobs
        SET state = 'running', lease_token = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
-       WHERE id = ? AND (state = 'pending' OR (state = 'running' AND lease_expires_at < ?))
+        WHERE id = ? AND ((state = 'pending' AND next_run_at <= ?) OR (state = 'running' AND lease_expires_at <= ?))
        RETURNING *`,
     )
-    .bind(leaseToken, expires, now.toISOString(), jobId, now.toISOString())
+    .bind(leaseToken, expires, now.toISOString(), jobId, now.toISOString(), now.toISOString())
     .first<{
       id: string;
       kind: JobKind;
@@ -1033,9 +1043,10 @@ export async function completeJob(
     .prepare(
       `UPDATE jobs
        SET state = 'done', lease_token = NULL, lease_expires_at = NULL, updated_at = ?
-       WHERE id = ? AND lease_token = ?`,
+        WHERE id = ? AND lease_token = ? AND state = 'running'
+          AND lease_expires_at > MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     )
-    .bind(new Date().toISOString(), jobId, leaseToken)
+    .bind(new Date().toISOString(), jobId, leaseToken, new Date().toISOString())
     .run();
 }
 
@@ -1055,9 +1066,10 @@ export async function failJob(
       `UPDATE jobs
        SET state = ?, last_error = ?, lease_token = NULL, lease_expires_at = NULL,
            next_run_at = ?, updated_at = ?
-       WHERE id = ? AND lease_token = ?`,
+        WHERE id = ? AND lease_token = ? AND state = 'running'
+          AND lease_expires_at > MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     )
-    .bind(terminal ? "failed" : "pending", error.slice(0, 800), nextRun, now.toISOString(), job.id, job.leaseToken)
+    .bind(terminal ? "failed" : "pending", error.slice(0, 800), nextRun, now.toISOString(), job.id, job.leaseToken, now.toISOString())
     .run();
 }
 
@@ -1076,10 +1088,33 @@ export async function deferJob(
       `UPDATE jobs
        SET state = 'pending', attempts = MAX(0, attempts - 1), last_error = ?,
            lease_token = NULL, lease_expires_at = NULL, next_run_at = ?, updated_at = ?
-       WHERE id = ? AND lease_token = ?`,
+        WHERE id = ? AND lease_token = ? AND state = 'running'
+          AND lease_expires_at > MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
     )
-    .bind(reason.slice(0, 800), nextRunAt, new Date().toISOString(), job.id, job.leaseToken)
+    .bind(reason.slice(0, 800), nextRunAt, new Date().toISOString(), job.id, job.leaseToken, new Date().toISOString())
     .run();
+}
+
+// Check ownership and expiry in each mutation, not a preceding read.
+const CURRENT_LEASE_SQL = `EXISTS (SELECT 1 FROM jobs WHERE id = ? AND lease_token = ?
+  AND article_id = ? AND state = 'running'
+  AND lease_expires_at > MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`;
+
+function leaseValues(job: Job): Array<string | null> {
+  return [job.id, job.leaseToken, job.articleId, new Date().toISOString()];
+}
+
+export async function renewJobLease(db: D1Database, job: Job, leaseSeconds = 240): Promise<boolean> {
+  const now = new Date().toISOString();
+  // Extend from the later of now and the current expiry so a renewal never
+  // shortens a lease that was claimed with a longer window.
+  const current = job.leaseExpiresAt ? Date.parse(job.leaseExpiresAt) : 0;
+  const base = Number.isFinite(current) && current > Date.now() ? current : Date.now();
+  const result = await db.prepare(`UPDATE jobs SET lease_expires_at = ?, updated_at = ?
+    WHERE id = ? AND lease_token = ? AND state = 'running'
+      AND lease_expires_at > MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+    .bind(new Date(base + leaseSeconds * 1000).toISOString(), now, job.id, job.leaseToken, now).run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 export async function reserveBudget(

@@ -1,0 +1,131 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createJob } from "../src/infrastructure/db";
+import { processJob, runDiscovery } from "../src/pipeline/run";
+import { PROMPT_VERSION, SCHEMA_VERSION } from "../src/pipeline/prompt";
+import type { Bindings } from "../src/shared/env";
+import { explanation, seed, seedRevision, sqliteDb } from "./helpers/sqlite";
+
+const mocks = vi.hoisted(() => ({ generate: vi.fn(), fetchPage: vi.fn(), extract: vi.fn(), snapshot: vi.fn(), discovery: vi.fn() }));
+vi.mock("../src/pipeline/generate", () => ({ attemptGeneration: mocks.generate }));
+vi.mock("../src/pipeline/extract", () => ({ fetchArticlePage: mocks.fetchPage, extractArticle: mocks.extract, toSnapshot: mocks.snapshot }));
+vi.mock("../src/pipeline/discovery", () => ({ parseDiscoveryHtml: mocks.discovery }));
+
+let store: ReturnType<typeof sqliteDb>;
+let env: Bindings;
+beforeEach(() => {
+  vi.resetAllMocks();
+  store = sqliteDb(); seed(store);
+  env = { DB: store.db, AI: {} as Ai, PIPELINE_QUEUE: { send: vi.fn() } as unknown as Queue, SITE_URL: "https://understory.test", AI_MODEL: "model" } as Bindings;
+  mocks.generate.mockResolvedValue({ ok: true, explanation, issues: [], rawText: "{}", usage: null });
+});
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); store.sqlite.close(); });
+
+async function generateJob() {
+  await createJob(store.db, { id: "job", kind: "generate", articleId: "article", payload: { snapshotId: "snapshot" }, idempotencyKey: "generate:snapshot" });
+}
+function existingRevision(status: string) {
+  seedRevision(store, status);
+  store.sqlite.prepare("UPDATE explanation_revisions SET prompt_version = ?, schema_version = ?").run(PROMPT_VERSION, SCHEMA_VERSION);
+}
+
+describe("pipeline consistency", () => {
+  it("does not turn a rejected revision into a phantom review on retry", async () => {
+    existingRevision("rejected"); await generateJob();
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("failed");
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it("does not demote a published article when its generation job is retried", async () => {
+    existingRevision("published"); await generateJob();
+    store.sqlite.exec("UPDATE articles SET status = 'published', published_revision_id = 'revision'");
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("published");
+  });
+  it("restores review only for an existing draft without spending model budget", async () => {
+    existingRevision("draft"); await generateJob();
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("review");
+    expect(store.sqlite.prepare("SELECT state FROM jobs").get()?.state).toBe("done");
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it("discards model output after the lease is replaced and another worker publishes", async () => {
+    await generateJob();
+    mocks.generate.mockImplementationOnce(async () => {
+      store.sqlite.exec("UPDATE jobs SET lease_token = 'replacement'; UPDATE articles SET status = 'published', published_revision_id = 'other'");
+      return { ok: true, explanation, issues: [], rawText: "{}", usage: null };
+    });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("published");
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM explanation_revisions").get()?.n).toBe(0);
+    expect(store.sqlite.prepare("SELECT state FROM jobs").get()?.state).toBe("running");
+  });
+  it("renews the lease while a model call exceeds the original 120 seconds", async () => {
+    vi.useFakeTimers(); await generateJob();
+    mocks.generate.mockImplementationOnce(() => new Promise((resolve) => setTimeout(() => resolve({ ok: true, explanation, issues: [], rawText: "{}", usage: null }), 180_000)));
+    const running = processJob(env, "job", 120);
+    await vi.advanceTimersByTimeAsync(121_000);
+    const expiry = String(store.sqlite.prepare("SELECT lease_expires_at FROM jobs").get()?.lease_expires_at);
+    expect(Date.parse(expiry)).toBeGreaterThan(Date.now());
+    await vi.advanceTimersByTimeAsync(60_000); await running;
+    expect(store.sqlite.prepare("SELECT state FROM jobs").get()?.state).toBe("done");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("review");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("discards output after lease expiry without replacement", async () => {
+    await generateJob();
+    mocks.generate.mockImplementationOnce(async () => {
+      store.sqlite.exec("UPDATE jobs SET lease_expires_at = '2000-01-01'");
+      return { ok: true, explanation, issues: [], rawText: "{}", usage: null };
+    });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM explanation_revisions").get()?.n).toBe(0);
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).not.toBe("review");
+    expect(store.sqlite.prepare("SELECT state FROM jobs").get()?.state).toBe("running");
+  });
+  it("defers exhausted-budget jobs without allowing duplicate queue delivery to bypass the delay", async () => {
+    env.DAILY_NEURON_BUDGET = "0"; await generateJob();
+    expect((await processJob(env, "job")).deferred).toBe(true);
+    expect((await processJob(env, "job")).detail).toContain("not claimable");
+    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(store.sqlite.prepare("SELECT attempts FROM jobs").get()?.attempts).toBe(0);
+  });
+  it("fences extraction failures after a replacement worker publishes", async () => {
+    await createJob(store.db, { id: "job", kind: "extract", articleId: "article", idempotencyKey: "extract:article" });
+    mocks.fetchPage.mockImplementationOnce(async () => {
+      store.sqlite.exec("UPDATE jobs SET lease_token = 'replacement'; UPDATE articles SET status = 'published', published_revision_id = 'other'");
+      throw new Error("late fetch failure");
+    });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("published");
+  });
+  it("fences extraction snapshots and downstream jobs after lease replacement", async () => {
+    await createJob(store.db, { id: "job", kind: "extract", articleId: "article", idempotencyKey: "extract:article" });
+    mocks.fetchPage.mockImplementationOnce(async () => {
+      store.sqlite.exec("UPDATE jobs SET lease_token = 'replacement'; UPDATE articles SET status = 'published', published_revision_id = 'other'");
+      return { html: "source", finalUrl: "https://example.com/post", status: 200 };
+    });
+    mocks.extract.mockResolvedValue({ wordCount: 300, links: [] });
+    mocks.snapshot.mockReturnValue({ articleId: "article", title: "Test article", url: "https://example.com/post", fetchedAt: new Date().toISOString(), extractorVersion: "test", wordCount: 300, blocks: [{ id: "b1", kind: "paragraph", text: "Source content", sourceUrl: "https://example.com/post", headingPath: [] }] });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("published");
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM article_snapshots").get()?.n).toBe(1);
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs").get()?.n).toBe(1);
+  });
+  it("stops retries after ownership is lost, retaining already spent model budget", async () => {
+    await generateJob();
+    mocks.generate.mockImplementationOnce(async () => {
+      store.sqlite.exec("UPDATE jobs SET lease_token = 'replacement'");
+      return { ok: false, explanation: null, issues: [], rawText: "invalid", usage: null };
+    });
+    await processJob(env, "job");
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+    expect(store.sqlite.prepare("SELECT used_neurons, reserved_neurons FROM ai_budget").get()).toMatchObject({ used_neurons: 500, reserved_neurons: 0 });
+  });
+  it("reconciles previously discovered articles without an extraction job", async () => {
+    store.sqlite.exec("UPDATE articles SET status = 'discovered'");
+    mocks.discovery.mockReturnValue([{ url: "https://example.com/post", publishedAt: new Date().toISOString(), sourceSiteUrl: "https://example.com", title: "Test article", sourceName: "Source" }]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html></html>")));
+    await runDiscovery(env, "retry");
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind = 'extract'").get()?.n).toBe(1);
+  });
+});

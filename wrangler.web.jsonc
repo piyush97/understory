@@ -37,7 +37,9 @@
     "SITE_URL": "https://understory.piyushmehta.com",
     "AI_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
     "DAILY_NEURON_BUDGET": "8000",
-    "REQUIRE_ACCESS_JWT": "false"
+    "REQUIRE_ACCESS_JWT": "false",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
   },
   "observability": {
     "enabled": true

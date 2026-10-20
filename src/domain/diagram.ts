@@ -65,7 +65,7 @@ export function renderDiagramSvg(diagram: Diagram): string {
     })
     .join("");
 
-  return `<svg class="diagram-svg" viewBox="0 0 ${round(width)} ${round(height)}" role="img" aria-labelledby="${titleId} ${descId}" xmlns="http://www.w3.org/2000/svg">
+  return `<svg class="diagram-svg" viewBox="0 0 ${round(width)} ${round(height)}" role="group" aria-labelledby="${titleId}" aria-describedby="${descId}" xmlns="http://www.w3.org/2000/svg">
   <title id="${titleId}">${label}</title>
   <desc id="${descId}">${description}</desc>
   <defs>
@@ -209,7 +209,7 @@ function renderSequence(
     })
     .join("");
 
-  return `<svg class="diagram-svg" viewBox="0 0 ${round(width)} ${round(height)}" role="img" aria-labelledby="${ids.titleId} ${ids.descId}" xmlns="http://www.w3.org/2000/svg">
+  return `<svg class="diagram-svg" viewBox="0 0 ${round(width)} ${round(height)}" role="group" aria-labelledby="${ids.titleId}" aria-describedby="${ids.descId}" xmlns="http://www.w3.org/2000/svg">
   <title id="${ids.titleId}">${ids.label}</title>
   <desc id="${ids.descId}">${ids.description}</desc>
   <defs>

@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AppEnv } from "../../shared/env";
 import { bool } from "../../shared/env";
+import { verifyAccessJwt } from "../../shared/access";
 import {
   approveRevision,
   getRevisionDetail,
@@ -37,9 +38,9 @@ async function authorize(c: Context<AppEnv>): Promise<AuthResult> {
   }
 
   if (bool(c.env.REQUIRE_ACCESS_JWT)) {
-    const email = c.req.header("cf-access-authenticated-user-email");
-    if (!email) return { ok: false, missingToken: false };
-    return { ok: true, reviewer: email };
+    const reviewer = await verifyAccessJwt(c.req.header("cf-access-jwt-assertion"), c.env);
+    if (!reviewer) return { ok: false, missingToken: false };
+    return { ok: true, reviewer };
   }
 
   return { ok: true, reviewer: "editorial" };
@@ -243,6 +244,9 @@ function renderLogin(c: Context<AppEnv>, missingToken: boolean) {
 }
 
 export async function handleLogin(c: Context<AppEnv>) {
+  if (bool(c.env.REQUIRE_ACCESS_JWT) && !(await verifyAccessJwt(c.req.header("cf-access-jwt-assertion"), c.env))) {
+    return c.text("Unauthorized", 401);
+  }
   const expected = c.env.ADMIN_TOKEN;
   if (!expected) return c.redirect("/admin");
   const body = await c.req.parseBody();

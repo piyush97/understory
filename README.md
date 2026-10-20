@@ -84,6 +84,13 @@ npm run check
 
 The tests cover canonical URLs, slugs, feed cursors, discovery parsing, explanation validation, diagram rendering, model output parsing, editorial source checks, and the budget kill switch.
 
+GitHub Actions runs a locked dependency install, Chromium regression tests,
+checks, dependency audit and
+both Worker dry-run bundles on pull requests and pushes to `main`. It has
+read-only permissions and no deployment credentials. Configure branch
+protection to require the `check` job before merging; the workflow alone does
+not prevent unchecked merges.
+
 For a visual pass, install Chromium once and use Playwright:
 
 ```bash
@@ -102,8 +109,8 @@ The daily budget defaults to 8,000 neurons, with roughly 500 neurons reserved pe
 
 ## Content and editorial rules
 
-- The seed contains ten published explainers based on real engineering blog posts, plus three discovered posts on the bench. The prose was written for Understory, not copied from the publishers.
-- Source snapshots are abbreviated editorial evidence: two or three short quotations and the canonical link per source. They are not full-text copies.
+- The seed contains ten published explainers based on real engineering blog posts, plus three discovered posts on the bench. The prose was written for Understory, not copied from the publishers. Live editorial approvals may increase the published count independently of these fixtures.
+- Public seed snapshots contain two or three short quotations and the canonical link per source. Runtime extraction stores a larger, bounded private snapshot for generation/review; it is not served through public routes. No automatic retention/deletion policy is implemented, so operators must manage that storage separately.
 - Generated content must cite source ids. Citations that point nowhere are rejected before review.
 - Sources can only use URLs found in the extracted page or the original canonical URL. The validator rejects invented URLs.
 - Diagrams are graph JSON rendered to deterministic SVG. The model never supplies SVG or JavaScript.
@@ -113,7 +120,11 @@ The daily budget defaults to 8,000 neurons, with roughly 500 neurons reserved pe
 
 ## Deployment
 
-Cloudflare credentials are required. The repository ships with placeholder D1 IDs, so deployment is intentionally blocked until a real database and queue exist.
+Cloudflare credentials are required. The checked-in configs describe the live
+Understory deployment, not a reusable environment. Database IDs are nonsecret,
+but forks must replace them. **Do not deploy unchanged configs into another
+account.** First choose your own Worker, database and queue names and domain.
+The commands below use the default names; substitute yours consistently.
 
 ```bash
 npx wrangler login
@@ -122,21 +133,27 @@ npx wrangler d1 create understory
 npx wrangler queues create understory-jobs
 ```
 
-Copy the D1 `database_id` into both `wrangler.web.jsonc` and `wrangler.pipeline.jsonc`. Set a real `SITE_URL` in both files (the first deploy can use `https://understory-web.<subdomain>.workers.dev`).
+Before applying migrations or deploying:
 
-Set the editorial secret on both workers:
+- Replace the D1 `database_id` and `database_name` in both configs with the new
+  database. Keep the `DB` binding unchanged.
+- Replace Worker names and queue names in both producer bindings and the
+  pipeline consumer if you chose different names. The created queue must match.
+- Replace `understory.piyushmehta.com` in the web `routes` entry with a hostname
+  in your Cloudflare zone, or remove `routes` to start on `workers.dev`.
+- Set `SITE_URL` in both configs to your final URL. For `workers.dev`, use
+  `https://<web-worker-name>.<account-subdomain>.workers.dev`.
 
-```bash
-npx wrangler secret put ADMIN_TOKEN --config wrangler.web.jsonc
-npx wrangler secret put ADMIN_TOKEN --config wrangler.pipeline.jsonc
-```
-
-Apply the schema and seed the launch edition:
+Apply the schema and seed the launch edition into the **new database only**:
 
 ```bash
 npm run db:migrate:remote
 npm run db:seed:remote
 ```
+
+The seed script upserts fixture articles and publication metadata; it is not
+a production upgrade or restore command. Do not rerun it against live edited
+content without reviewing its effects.
 
 Deploy the pipeline first so the queue consumer exists, then the web worker:
 
@@ -145,9 +162,44 @@ npm run deploy:pipeline
 npm run deploy:web
 ```
 
-After the first deploy, update `SITE_URL` to the final `workers.dev` URL and redeploy both workers. The cron trigger is part of the pipeline deployment.
+Install a strong, randomly generated editorial secret on both deployed Workers
+using Wrangler's interactive secret prompt (never commit or paste it into logs):
 
-Optional hardening: put Cloudflare Access in front of `/admin` and set `REQUIRE_ACCESS_JWT="true"`. The admin code then requires the Access email header in addition to the editorial token. Access itself validates the JWT at the edge.
+```bash
+npx wrangler secret put ADMIN_TOKEN --config wrangler.web.jsonc
+npx wrangler secret put ADMIN_TOKEN --config wrangler.pipeline.jsonc
+```
+
+If your URL changed during initial deployment, update both `SITE_URL` values and
+redeploy. The pipeline deployment activates the existing `*/15 * * * *` cron
+in UTC (the next quarter-hour). To remove automatic discovery, remove its
+`triggers.crons` entry and redeploy the pipeline. A zero neuron budget pauses
+generation, not discovery.
+
+Optional hardening: put Cloudflare Access in front of `/admin`, set the
+`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` values in `wrangler.web.jsonc` (the
+`ACCESS_AUD` value is the application audience tag shown in the Access
+application overview), then set `REQUIRE_ACCESS_JWT="true"` on the web Worker.
+The Worker requires both the editorial token and a valid signed Access
+assertion. Missing settings or invalid assertions fail closed. Protect every
+enabled hostname, not just the custom domain.
+
+### Release and operations checklist
+
+- Enable required checks on `main` and private vulnerability reporting when
+  available. These are repository settings, not changes the workflow applies.
+- Check `/health` on the pipeline, a public article, RSS/sitemap, anonymous
+  admin login, and the authenticated review queue after deploying.
+- For code rollback use `npx wrangler rollback --config <worker-config>` after
+  checking its deployment history. Worker rollback does not undo D1 writes;
+  arrange and test D1 backup/recovery before schema or destructive data changes.
+- Cloudflare may inject its Insights beacon at the edge. The current CSP blocks
+  it. Disable unused edge analytics injection rather than weakening CSP; if you
+  intentionally enable analytics, document the data collected first.
+- Earlier Git history contains longer publisher excerpts than current fixture
+  limits. Before changing repository visibility, decide whether that history
+  is acceptable; do not rewrite shared history without owner approval. Quote
+  limits and attribution do not establish legal permission.
 
 ## Free-tier notes
 

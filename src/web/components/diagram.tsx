@@ -20,6 +20,9 @@ export function DiagramPlate({ diagram, figure = "1", compact = false }: Diagram
       </div>
       <div
         class={compact ? "diagram-canvas diagram-canvas--compact" : "diagram-canvas"}
+        role="region"
+        aria-label={`${diagram.title} — scrollable diagram`}
+        tabIndex={0}
         dangerouslySetInnerHTML={{ __html: svg }}
       />
       <figcaption class="diagram-caption">
