@@ -1,4 +1,5 @@
 import type { SourceBlock, SourceSnapshot } from "../domain/source";
+import { fetchPublicText } from "../shared/fetch";
 
 export const EXTRACTOR_VERSION = "htmlrewriter-1";
 
@@ -316,29 +317,18 @@ export type FetchedPage = {
 };
 
 export async function fetchArticlePage(url: string, userAgent: string): Promise<FetchedPage> {
-  const response = await fetch(url, {
-    redirect: "follow",
+  const response = await fetchPublicText(url, {
+    maxBytes: 8_000_000,
     headers: {
       "User-Agent": userAgent,
       Accept: "text/html,application/xhtml+xml",
       "Accept-Language": "en",
     },
-    signal: AbortSignal.timeout(20_000),
+    timeoutMs: 20_000,
+    acceptContentType: (type) => type.includes("text/html") || type.includes("application/xhtml"),
   });
 
-  const contentType = response.headers.get("content-type") ?? "";
-  if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
-    throw new Error(`Unsupported content type: ${contentType || "unknown"}`);
-  }
-  if (!response.ok) throw new Error(`Source responded ${response.status}`);
-
-  const declared = Number.parseInt(response.headers.get("content-length") ?? "0", 10);
-  if (declared > 8_000_000) throw new Error("Source page is too large");
-
-  const html = await response.text();
-  if (html.length > 8_000_000) throw new Error("Source page is too large");
-
-  return { html, finalUrl: response.url || url, status: response.status };
+  return { html: response.text, finalUrl: response.url, status: response.status };
 }
 
 export function toSnapshot(
