@@ -197,8 +197,16 @@ export function renderAbout(c: Context<AppEnv>) {
                   engineeringblogs.xyz <IconArrowUpRight size={11} />
                 </a>
                 , a public index run by Peter Cooper. The original authors and publishers own
-                their work. Type is set in Barlow Condensed, Source Serif 4, and Spline Sans Mono,
-                all under the SIL Open Font License.
+                their work. Type is set in{" "}
+                <a href="/assets/fonts/OFL-Barlow-Condensed.txt">Barlow Condensed</a>,{" "}
+                <a href="/assets/fonts/OFL-Source-Serif-4.txt">Source Serif 4</a>, and{" "}
+                <a href="/assets/fonts/OFL-Spline-Sans-Mono.txt">Spline Sans Mono</a>, all under
+                the SIL Open Font License.
+              </p>
+              <p>
+                Understory's code is MIT-licensed. Its original explainer prose and diagrams are
+                CC BY 4.0. Publisher articles, quotations, fonts, and trademarks are excluded from
+                those licenses; the source links carry the original terms.
               </p>
             </section>
           </div>

@@ -9,3 +9,6 @@ coverage/
 .vercel/
 .impeccable/
 .archify/
+.agents/
+.hermes/
+skills-lock.json

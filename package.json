@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Engineering blogs, explained. A reading layer with context, diagrams, and sources.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/piyush97/understory.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "wrangler dev --config wrangler.web.jsonc --port 8790",
     "dev:pipeline": "wrangler dev --config wrangler.pipeline.jsonc --port 8791",
@@ -17,8 +25,7 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run test",
     "deploy:web": "wrangler deploy --config wrangler.web.jsonc",
-    "deploy:pipeline": "wrangler deploy --config wrangler.pipeline.jsonc",
-    "fonts": "tsx scripts/fetch-fonts.ts"
+    "deploy:pipeline": "wrangler deploy --config wrangler.pipeline.jsonc"
   },
   "dependencies": {
     "hono": "^4.13.13",
