@@ -117,7 +117,7 @@ export function renderAbout(c: Context<AppEnv>) {
                 <li>No accounts, comments, voting, or public submissions in this version.</li>
                 <li>No arbitrary URL ingestion and no unrestricted URL proxy.</li>
                 <li>No model inference on a reader request, and no chat with the article.</li>
-                <li>No reproduction of the full original text. Links and short quotes only.</li>
+                <li>No public reproduction of the full original text. Links and short quotes only.</li>
                 <li>No claim that a generated draft is a fact-check. A person reviews it first.</li>
               </ul>
             </section>

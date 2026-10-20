@@ -30,6 +30,7 @@ in local Wrangler; use the seeded fixtures for UI work.
 Run these before opening a pull request:
 
 ```bash
+npx playwright install chromium
 npm run check
 ```
 
@@ -44,8 +45,9 @@ migration and update the seeds or tests that depend on it.
 - Keep server-rendered output accessible and usable without JavaScript.
 - Do not add a dependency for something the standard library or an existing
   dependency already does well.
-- Do not put secrets, tokens, account IDs, or database IDs in source files.
-  Use `.dev.vars` locally and Wrangler secrets in deployment.
+- Do not put credentials or tokens in source files. Use `.dev.vars` locally
+  and Wrangler secrets in deployment. Account/database IDs are nonsecret
+  resource identifiers; forks must replace the production IDs and routes.
 
 ## Editorial contributions
 
