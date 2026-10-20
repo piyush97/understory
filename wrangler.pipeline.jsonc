@@ -8,7 +8,7 @@
     {
       "binding": "DB",
       "database_name": "understory",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "8f707714-19be-4a7c-aa64-17bb6ec61bf3",
       "migrations_dir": "migrations"
     }
   ],
@@ -38,7 +38,7 @@
   "vars": {
     "ENVIRONMENT": "production",
     "SITE_NAME": "Understory",
-    "SITE_URL": "https://understory.example",
+    "SITE_URL": "https://understory.piyushmehta.com",
     "AI_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
     "DAILY_NEURON_BUDGET": "8000",
     "DISCOVERY_URL": "https://engineeringblogs.xyz/",
