@@ -176,9 +176,10 @@ in UTC (the next quarter-hour). To remove automatic discovery, remove its
 `triggers.crons` entry and redeploy the pipeline. A zero neuron budget pauses
 generation, not discovery.
 
-Optional hardening: put Cloudflare Access in front of `/admin`, configure
-`ACCESS_TEAM_DOMAIN="your-team.cloudflareaccess.com"` and `ACCESS_AUD` (the
-application audience), then set `REQUIRE_ACCESS_JWT="true"` on the web Worker.
+Optional hardening: put Cloudflare Access in front of `/admin`, set the
+`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` values in `wrangler.web.jsonc` (the
+`ACCESS_AUD` value is the application audience tag shown in the Access
+application overview), then set `REQUIRE_ACCESS_JWT="true"` on the web Worker.
 The Worker requires both the editorial token and a valid signed Access
 assertion. Missing settings or invalid assertions fail closed. Protect every
 enabled hostname, not just the custom domain.
