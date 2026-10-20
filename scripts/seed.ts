@@ -96,10 +96,12 @@ function statementsFor(fixture: FixtureArticle): string[] {
       reviewedBy: "Understory editorial",
       sourceSnapshotId: snapshot.id,
     });
+    const reviewNote =
+      "Seeded edition. Written from the linked source, reviewed before publication.";
     statements.push(
       `INSERT INTO explanation_revisions\n` +
         `  (id, article_id, snapshot_id, status, content_json, provenance_json, model_id, prompt_version, schema_version, reviewed_at, reviewed_by, review_note)\n` +
-        `VALUES (${quote(revisionId)}, ${quote(article.id)}, ${quote(snapshot.id)}, ${quote("published")}, ${quote(JSON.stringify(explanation))}, ${quote(provenance)}, ${quote("editorial-fixture")}, ${quote("fixture-1")}, ${quote("1")}, ${quote(snapshot.fetchedAt)}, ${quote("Understory editorial")}, ${quote("Seeded launch edition. Written from the linked source, reviewed before publication.")})\n` +
+        `VALUES (${quote(revisionId)}, ${quote(article.id)}, ${quote(snapshot.id)}, ${quote("published")}, ${quote(JSON.stringify(explanation))}, ${quote(provenance)}, ${quote("editorial-fixture")}, ${quote("fixture-1")}, ${quote("1")}, ${quote(snapshot.fetchedAt)}, ${quote("Understory editorial")}, ${quote(reviewNote)})\n` +
         `ON CONFLICT (id) DO UPDATE SET\n` +
         `  status = excluded.status,\n` +
         `  content_json = excluded.content_json,\n` +
@@ -107,6 +109,15 @@ function statementsFor(fixture: FixtureArticle): string[] {
         `  reviewed_at = excluded.reviewed_at,\n` +
         `  reviewed_by = excluded.reviewed_by,\n` +
         `  review_note = excluded.review_note;`,
+    );
+    statements.push(
+      `INSERT INTO reviews (id, revision_id, decision, note, reviewer, created_at)\n` +
+        `VALUES (${quote(`revw_${revisionId}`)}, ${quote(revisionId)}, 'approved', ${quote(reviewNote)}, ${quote("Understory editorial")}, ${quote(snapshot.fetchedAt)})\n` +
+        `ON CONFLICT (id) DO UPDATE SET\n` +
+        `  decision = excluded.decision,\n` +
+        `  note = excluded.note,\n` +
+        `  reviewer = excluded.reviewer,\n` +
+        `  created_at = excluded.created_at;`,
     );
   }
 
