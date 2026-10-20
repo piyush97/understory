@@ -45,11 +45,11 @@
       return item.slug !== record.slug;
     });
     records.unshift(Object.assign({}, record, { savedAt: Date.now() }));
-    writeBookmarks(records);
+    return writeBookmarks(records);
   }
 
   function removeBookmark(slug) {
-    writeBookmarks(
+    return writeBookmarks(
       readBookmarks().filter(function (record) {
         return record.slug !== slug;
       }),
@@ -61,6 +61,16 @@
     button.classList.toggle("is-saved", saved);
     var label = button.querySelector(".save-button__label");
     if (label) label.textContent = saved ? "Saved" : "Save";
+  }
+
+  function reportBookmarkWrite(success, action) {
+    var status = document.getElementById("bookmark-status");
+    if (status) {
+      status.textContent = success
+        ? ""
+        : "Could not " + action + " in this browser. Storage may be full or blocked.";
+    }
+    return success;
   }
 
   function refreshButtons() {
@@ -88,13 +98,11 @@
         } catch (error) {
           return;
         }
-        if (isSaved(record.slug)) {
-          removeBookmark(record.slug);
-        } else {
-          addBookmark(record);
-        }
+        var saved = isSaved(record.slug);
+        var success = saved ? removeBookmark(record.slug) : addBookmark(record);
+        reportBookmarkWrite(success, saved ? "remove this bookmark" : "save this sheet");
         refreshButtons();
-        renderBookmarksPage();
+        if (success) renderBookmarksPage();
       });
     });
   }
@@ -169,7 +177,7 @@
       if (remove) {
         remove.setAttribute("aria-label", "Remove bookmark for " + record.headline);
         remove.addEventListener("click", function () {
-          removeBookmark(record.slug);
+          if (!reportBookmarkWrite(removeBookmark(record.slug), "remove this bookmark")) return;
           renderBookmarksPage();
           refreshButtons();
         });

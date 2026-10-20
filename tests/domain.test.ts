@@ -137,7 +137,7 @@ describe("diagram rendering", () => {
 
     expect(first).toBe(second);
     expect(first.startsWith("<svg")).toBe(true);
-    expect(first).toContain('role="img"');
+    expect(first).toContain('role="group"');
     expect(first).toContain("<title");
     for (const node of diagram.nodes) {
       expect(first).toContain(`data-node="${node.id}"`);
