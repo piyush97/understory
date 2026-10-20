@@ -12,3 +12,4 @@ coverage/
 .agents/
 .hermes/
 skills-lock.json
+.superpowers/

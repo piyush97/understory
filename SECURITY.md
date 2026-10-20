@@ -47,9 +47,24 @@ Out of scope:
 ## Secrets and local data
 
 `.dev.vars`, `.env`, `.wrangler/`, and `.tmp/` are ignored by Git. Do not commit
-real Cloudflare API tokens, D1 database IDs, account IDs, or editorial tokens.
-The example configuration uses placeholders and a local development token.
+Cloudflare API tokens, Access credentials, editorial tokens, or private logs.
+Database/account IDs identify resources but do not authorize access; production
+configuration contains such nonsecret identifiers. Forks must replace these
+IDs and the custom-domain route. The example development token is not suitable
+for a deployed site.
 
 If you believe a secret was published, rotate it first, then report the
 exposure. Removing the commit is not enough; the value must be treated as
 compromised.
+
+## Deployment boundaries
+
+The editorial token is always required. With `REQUIRE_ACCESS_JWT="true"`,
+configure `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` for a Cloudflare Access
+application; the Worker verifies its signed assertion, not an email header.
+Protect every ingress, including any enabled `workers.dev` hostname.
+
+Publisher fetches reject nonpublic literal addresses and unsafe redirects,
+with redirect, byte and time limits. Hostname checks do not resolve DNS and
+cannot by themselves prevent DNS rebinding. The deployment must not expose
+private network services to outbound publisher requests.
