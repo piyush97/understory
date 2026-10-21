@@ -27,7 +27,7 @@ async function jwt(claims: Record<string, unknown> = {}, header = { alg: "RS256"
   return `${input}.${Buffer.from(signature).toString("base64url")}`;
 }
 function request(path: string, headers: Record<string, string> = {}, bindings = env, body?: string) {
-  return app.fetch(new Request(`https://example.com${path}`, { method: "POST", headers: { authorization: "Bearer test-editor-token", ...headers }, body }), bindings, {} as ExecutionContext);
+  return app.fetch(new Request(`https://example.com${path}`, { method: "POST", headers: { origin: "https://example.com", authorization: "Bearer test-editor-token", ...headers }, body }), bindings, {} as ExecutionContext);
 }
 beforeAll(async () => {
   pair = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
@@ -41,6 +41,14 @@ describe("public cache", () => {
     const response = await app.fetch(new Request("https://example.com/"), env, { waitUntil() {} } as unknown as ExecutionContext);
     expect(await response.text()).toBe("cached");
     expect(dbModule.getSiteState).not.toHaveBeenCalled();
+  });
+});
+
+describe("admin request origin", () => {
+  it("rejects a cross-site admin action", async () => {
+    const response = await request("/admin/discover", { origin: "https://evil.example" });
+    expect(response.status).toBe(403);
+    expect(env.PIPELINE_QUEUE.send).not.toHaveBeenCalled();
   });
 });
 

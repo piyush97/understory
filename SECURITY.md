@@ -62,7 +62,11 @@ compromised.
 The editorial token is always required. With `REQUIRE_ACCESS_JWT="true"`,
 configure `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` for a Cloudflare Access
 application; the Worker verifies its signed assertion, not an email header.
-Protect every ingress, including any enabled `workers.dev` hostname.
+Protect every ingress, including any enabled `workers.dev` hostname. The Worker
+rejects admin POSTs whose `Origin` does not match `SITE_URL`, but it does not
+throttle credential guesses: put a Cloudflare WAF rate-limit rule on
+`/admin/login` (or disable token login and rely on Access) before exposing the
+desk.
 
 Publisher fetches reject nonpublic literal addresses and unsafe redirects,
 with redirect, byte and time limits. Hostname checks do not resolve DNS and

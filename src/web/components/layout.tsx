@@ -16,6 +16,7 @@ type LayoutProps = {
   noindex?: boolean;
   bodyClass?: string;
   ogType?: "website" | "article";
+  jsonLd?: Record<string, unknown>;
 };
 
 const NAV: Array<{ id: Exclude<ActiveNav, null>; label: string; href: string }> = [
@@ -37,6 +38,7 @@ export function Layout({
   noindex = false,
   bodyClass = "",
   ogType = "website",
+  jsonLd,
 }: LayoutProps) {
   const fullTitle = title === "Understory" ? title : `${title} · Understory`;
   const canonical = new URL(path, siteUrl.endsWith("/") ? siteUrl : `${siteUrl}/`).toString();
@@ -70,10 +72,17 @@ export function Layout({
         <meta name="twitter:title" content={title} />
         <meta name="twitter:description" content={description} />
         <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+        <link rel="alternate" type="application/rss+xml" title="Understory" href="/feed.xml" />
         <link rel="preload" href="/assets/fonts/barlow-condensed-600.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
         <link rel="preload" href="/assets/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
         <link rel="stylesheet" href="/assets/styles.css" />
         <script src="/assets/app.js" defer></script>
+        {jsonLd ? (
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }}
+          />
+        ) : null}
       </head>
       <body class={bodyClass}>
         <a class="skip-link" href="#main">

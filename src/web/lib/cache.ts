@@ -3,35 +3,44 @@ import type { AppEnv } from "../../shared/env";
 import { getPublicationVersion, getSiteState } from "../../infrastructure/db";
 
 const VERSION_TTL_MS = 30_000;
+// Workers must not share I/O promises across requests, so only the resolved
+// value is memoized.
 let versionMemo: { value: string; at: number } | null = null;
-let versionInFlight: Promise<string> | null = null;
 
 async function publicationVersion(c: Context<AppEnv>): Promise<string> {
   if (versionMemo && Date.now() - versionMemo.at < VERSION_TTL_MS) return versionMemo.value;
+  const value = await getPublicationVersion(c.env.DB);
+  versionMemo = { value, at: Date.now() };
+  return value;
+}
 
-  versionInFlight ??= getPublicationVersion(c.env.DB)
-    .then((value) => {
-      versionMemo = { value, at: Date.now() };
-      return value;
-    })
-    .finally(() => {
-      versionInFlight = null;
-    });
-  return versionInFlight;
+async function loadSite(c: Context<AppEnv>, enabled: boolean): Promise<void> {
+  if (!enabled || c.get("site")) return;
+  try {
+    c.set("site", await getSiteState(c.env.DB));
+  } catch {
+    c.set("site", { published: 0, sources: 0, topics: 0, inReview: 0, publicationVersion: "0" });
+  }
 }
 
 export async function cachePage(
   c: Context<AppEnv>,
   ttlSeconds: number,
   render: () => Response | Promise<Response>,
+  options: { site?: boolean } = {},
 ): Promise<Response> {
-  if (c.env.ENVIRONMENT !== "production") return render();
+  const withSite = options.site !== false;
+  if (c.env.ENVIRONMENT !== "production") {
+    await loadSite(c, withSite);
+    return render();
+  }
 
   let key: Request;
   let version: string;
   try {
     version = await publicationVersion(c);
   } catch {
+    await loadSite(c, withSite);
     return render();
   }
 
@@ -45,6 +54,7 @@ export async function cachePage(
     keyUrl.searchParams.set("__v", version);
     key = new Request(keyUrl.toString(), { method: "GET" });
   } catch {
+    await loadSite(c, withSite);
     return render();
   }
 
@@ -53,11 +63,7 @@ export async function cachePage(
     const hit = await cache.match(key);
     if (hit) return hit;
 
-    try {
-      c.set("site", await getSiteState(c.env.DB));
-    } catch {
-      // Fall through: an error page renders without counts.
-    }
+    await loadSite(c, withSite);
     const response = await render();
     if (response.status !== 200) return response;
 
@@ -79,6 +85,7 @@ export async function cachePage(
     }
     return cacheable;
   } catch {
+    await loadSite(c, withSite);
     return render();
   }
 }

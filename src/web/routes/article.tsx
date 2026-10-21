@@ -43,6 +43,17 @@ export async function renderArticle(c: Context<AppEnv>) {
       siteUrl={c.env.SITE_URL}
       active={null}
       ogType="article"
+      jsonLd={{
+        "@context": "https://schema.org",
+        "@type": "Article",
+        headline: explanation.contextHeadline,
+        description: explanation.dek,
+        datePublished: article.publishedAt,
+        author: { "@type": "Person", name: article.author ?? article.sourceName },
+        publisher: { "@type": "Organization", name: "Understory" },
+        isBasedOn: article.canonicalUrl,
+        url: new URL(`/articles/${article.slug}`, c.env.SITE_URL).toString(),
+      }}
     >
       <article class="article-page">
         <ArticleHeader article={article} explanation={explanation} />

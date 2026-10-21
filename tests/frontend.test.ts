@@ -20,6 +20,28 @@ const diagram: Diagram = {
   edges: [{ from: "client", to: "worker", label: "Request", cite: "s1" }],
 };
 
+describe("reading metadata", () => {
+  it("advertises the feed and renders article structured data", () => {
+    const html = String(createElement(Layout, {
+      title: "Test", description: "Fixture", path: "/articles/test",
+      site: { published: 1, sources: 1, topics: 1, inReview: 0, publicationVersion: "1" },
+      jsonLd: { "@context": "https://schema.org", "@type": "Article", headline: "Test </script>" },
+      children: "body",
+    }));
+    expect(html).toContain('rel="alternate" type="application/rss+xml" title="Understory" href="/feed.xml"');
+    expect(html).toContain('type="application/ld+json"');
+    expect(html).toContain('"@type":"Article"');
+    expect(html).not.toContain("Test </script>");
+  });
+
+  it("keeps label text legible and tap targets large enough", () => {
+    expect(css).not.toMatch(/font-size:\s*(7|8|9)px/);
+    expect(css).toMatch(/--fs-label:\s*1[01]px/);
+    expect(css).toMatch(/\.save-button\s*{[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/\.topic-strip__item\s*{[^}]*min-height:\s*44px/s);
+  });
+});
+
 function renderLayout(content: string) {
   return String(createElement(Layout, {
     title: "Test", description: "Local regression fixture", path: "/about",

@@ -84,6 +84,39 @@ describe("cachePage site state", () => {
     expect(db.getSiteState).not.toHaveBeenCalled();
   });
 
+  it("skips site counts for routes that do not render the layout", async () => {
+    db.getPublicationVersion.mockResolvedValue("7");
+    const cachePage = await load();
+    stubCache(false);
+    await cachePage(ctx("https://x.test/api/articles"), 60, () => new Response("{}"), { site: false });
+    expect(db.getSiteState).not.toHaveBeenCalled();
+  });
+
+  it("renders with zero counts when site state cannot load", async () => {
+    db.getPublicationVersion.mockResolvedValue("7");
+    db.getSiteState.mockRejectedValue(new Error("d1 down"));
+    const cachePage = await load();
+    stubCache(false);
+    const c = ctx("https://x.test/");
+    await cachePage(c, 60, () => {
+      expect(c.get("site")).toMatchObject({ published: 0, publicationVersion: "0" });
+      return new Response("ok");
+    });
+  });
+
+  it("does not share an in-flight version lookup across requests", async () => {
+    const pending: Array<(value: string) => void> = [];
+    db.getPublicationVersion.mockImplementation(() => new Promise<string>((r) => { pending.push(r); }));
+    const cachePage = await load();
+    stubCache(false);
+    const first = cachePage(ctx("https://x.test/"), 60, () => new Response("a"));
+    const second = cachePage(ctx("https://x.test/about"), 60, () => new Response("b"));
+    await Promise.resolve();
+    expect(db.getPublicationVersion).toHaveBeenCalledTimes(2);
+    for (const resolve of pending) resolve("7");
+    await Promise.allSettled([first, second]);
+  });
+
   it("reuses the publication version for 30 seconds", async () => {
     db.getPublicationVersion.mockResolvedValue("7");
     const cachePage = await load();

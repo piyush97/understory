@@ -76,6 +76,16 @@ app.use("*", async (c, next) => {
 // desk always needs them. This keeps cached views at zero counting queries.
 app.use("*", async (c, next) => {
   const admin = c.req.path === "/admin" || c.req.path.startsWith("/admin/");
+  if (admin && c.req.method === "POST") {
+    const origin = c.req.header("origin");
+    let expected: string | null = null;
+    try {
+      expected = new URL(c.env.SITE_URL).origin;
+    } catch {
+      // A missing SITE_URL is validated at deploy time; fail CLOSED here.
+    }
+    if (!origin || origin !== expected) return c.text("Forbidden", 403);
+  }
   if (admin) {
     try {
       c.set("site", await getSiteState(c.env.DB));
@@ -109,12 +119,12 @@ app.get("/sources", (c) => cachePage(c, 900, () => renderSources(c)));
 app.get("/about", (c) => cachePage(c, 900, () => renderAbout(c)));
 app.get("/bookmarks", (c) => cachePage(c, 900, () => renderBookmarks(c)));
 
-app.get("/api/articles", (c) => cachePage(c, 60, () => renderApiArticles(c)));
-app.get("/api/articles/:slug", (c) => cachePage(c, 300, () => renderApiArticle(c)));
+app.get("/api/articles", (c) => cachePage(c, 60, () => renderApiArticles(c), { site: false }));
+app.get("/api/articles/:slug", (c) => cachePage(c, 300, () => renderApiArticle(c), { site: false }));
 
-app.get("/robots.txt", (c) => cachePage(c, 3600, () => renderRobots(c)));
-app.get("/sitemap.xml", (c) => cachePage(c, 900, () => renderSitemap(c)));
-app.get("/feed.xml", (c) => cachePage(c, 900, () => renderFeedXml(c)));
+app.get("/robots.txt", (c) => cachePage(c, 3600, () => renderRobots(c), { site: false }));
+app.get("/sitemap.xml", (c) => cachePage(c, 900, () => renderSitemap(c), { site: false }));
+app.get("/feed.xml", (c) => cachePage(c, 900, () => renderFeedXml(c), { site: false }));
 
 app.get("/admin", (c) => renderAdmin(c));
 app.post("/admin/login", (c) => handleLogin(c));

@@ -9,6 +9,7 @@ import { LeadStory } from "../components/lead";
 import { parseExplanation } from "../lib/content";
 import { formatDate } from "../lib/format";
 import { IconArrowRight } from "../components/icons";
+import { renderNotFound } from "./not-found";
 
 export async function renderFeed(c: Context<AppEnv>) {
   const db = c.env.DB;
@@ -23,6 +24,7 @@ export async function renderFeed(c: Context<AppEnv>) {
   ]);
 
   const topic = topicId ? topics.find((item) => item.id === topicId) ?? null : null;
+  if (topicId && !topic) return renderNotFound(c);
   const isFirstPage = !cursor && !topicId;
   const lead = isFirstPage ? await getFeedLead(db) : null;
   const leadExplanation = lead ? parseExplanation(lead.revisionContent) : null;
