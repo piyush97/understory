@@ -657,6 +657,26 @@ export async function findArticleByUrl(db: D1Database, canonicalUrl: string): Pr
   return row ? mapArticle(row) : null;
 }
 
+export async function findArticlesByUrls(
+  db: D1Database,
+  canonicalUrls: string[],
+): Promise<Map<string, { id: string; status: string }>> {
+  const found = new Map<string, { id: string; status: string }>();
+  const unique = [...new Set(canonicalUrls)];
+  for (let index = 0; index < unique.length; index += 90) {
+    const chunk = unique.slice(index, index + 90);
+    if (chunk.length === 0) continue;
+    const result = await db
+      .prepare(
+        `SELECT id, canonical_url, status FROM articles WHERE canonical_url IN (${chunk.map(() => "?").join(", ")})`,
+      )
+      .bind(...chunk)
+      .all<{ id: string; canonical_url: string; status: string }>();
+    for (const row of result.results) found.set(row.canonical_url, { id: row.id, status: row.status });
+  }
+  return found;
+}
+
 export async function findArticleBySlug(db: D1Database, slug: string): Promise<Article | null> {
   const row = await db.prepare("SELECT * FROM articles WHERE slug = ?").bind(slug).first<ArticleRow>();
   return row ? mapArticle(row) : null;

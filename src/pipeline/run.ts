@@ -15,7 +15,7 @@ import {
   deferJob,
   failJob,
   findArticleBySlug,
-  findArticleByUrl,
+  findArticlesByUrls,
   findRevisionKey,
   findSourceByHost,
   getArticleRow,
@@ -78,10 +78,12 @@ export async function runDiscovery(env: Bindings, reason: string): Promise<RunRe
   let skipped = 0;
   let queued = 0;
 
+  const known = await findArticlesByUrls(env.DB, posts.map((post) => post.url));
+
   for (const post of posts) {
     if (inserted >= MAX_NEW_ARTICLES_PER_DISCOVERY) break;
 
-    const existing = await findArticleByUrl(env.DB, post.url);
+    const existing = known.get(post.url);
     if (existing) {
       if (existing.status === "discovered") {
         await createJob(env.DB, { id: `job_extract_${existing.id}`, kind: "extract", articleId: existing.id,
@@ -340,7 +342,7 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
       await releaseBudgetReservation(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT);
       throw error;
     }
-    await recordBudgetUsage(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT, neuronsFromUsage(generation.usage));
+    await recordBudgetUsage(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT, neuronsFromUsage(generation.usage, model));
 
     if (generation.ok) break;
     previous = { rawText: generation.rawText, issues: generation.issues };
@@ -351,7 +353,9 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
     const issues = generation?.issues ?? [{ path: "(root)", message: "No generation result" }];
     const message = issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ").slice(0, 700);
     await setArticleStatus(env.DB, article.id, "failed", message, job);
-    await failJob(env.DB, job, message, { terminal: job.attempts >= 3 });
+    // A schema or editorial rejection is deterministic; retrying the job only
+    // repeats the same model call and burns the daily neuron budget.
+    await failJob(env.DB, job, message, { terminal: true });
     return { ok: false, detail: `Generation rejected: ${message}` };
   }
 
@@ -448,7 +452,7 @@ export async function handleQueueBatch(
 export async function runScheduled(env: Bindings, now = new Date()): Promise<void> {
   const last = await getMeta(env.DB, "last_discovery_enqueued_at");
   const lastMs = last ? Date.parse(last) : 0;
-  const due = !Number.isFinite(lastMs) || now.getTime() - lastMs >= 10 * 60_000;
+  const due = !Number.isFinite(lastMs) || now.getTime() - lastMs >= DISCOVERY_INTERVAL_MINUTES * 60_000;
 
   if (due) {
     await env.PIPELINE_QUEUE.send({ kind: "discover", reason: "cron" });
