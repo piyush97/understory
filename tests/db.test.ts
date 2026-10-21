@@ -87,6 +87,35 @@ describe("discovery persistence", () => {
 });
 
 describe("editorial transitions", () => {
+  it("does not auto-publish an existing draft when a generation insert conflicts", async () => {
+    const db = setup(); seedRevision(db); const job = await lease(db);
+    const draft = db.sqlite.prepare("SELECT * FROM explanation_revisions WHERE id = 'revision'").get()!;
+    const inserted = await insertRevision(db.db, {
+      id: "revision", articleId: "article", snapshotId: "snapshot",
+      contentJson: draft.content_json as string, provenanceJson: "{}",
+      modelId: draft.model_id as string, promptVersion: draft.prompt_version as string,
+      schemaVersion: draft.schema_version as string,
+    }, job, { reviewer: "Understory automated validation" });
+    expect(inserted).toBe(false);
+    expect(db.sqlite.prepare("SELECT status FROM explanation_revisions").get()?.status).toBe("draft");
+    expect(db.sqlite.prepare("SELECT published_revision_id FROM articles").get()?.published_revision_id).toBeNull();
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(0);
+    expect(db.sqlite.prepare("SELECT value FROM meta WHERE key = 'publication_version'").get()?.value).toBe("0");
+  });
+  it("rolls back automatic publication if updating the article fails", async () => {
+    const db = setup(); seedRevision(db); const job = await lease(db);
+    const draft = db.sqlite.prepare("SELECT * FROM explanation_revisions WHERE id = 'revision'").get()!;
+    db.sqlite.exec("DELETE FROM explanation_revisions");
+    db.failOn("UPDATE articles");
+    await expect(insertRevision(db.db, {
+      id: "new-revision", articleId: "article", snapshotId: "snapshot",
+      contentJson: draft.content_json as string, provenanceJson: "{}",
+      modelId: "test", promptVersion: "1", schemaVersion: "1",
+    }, job, { reviewer: "Understory automated validation" })).rejects.toThrow("injected write failure");
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM explanation_revisions").get()?.n).toBe(0);
+    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(0);
+    expect(db.sqlite.prepare("SELECT value FROM meta WHERE key = 'publication_version'").get()?.value).toBe("0");
+  });
   it("cannot publish a revision rejected after the initial draft read", async () => {
     const db = setup(); seedRevision(db);
     db.beforeBatch(async () => { expect(await rejectRevision(db.db, "revision", "rejector", "No")).toBe(true); });

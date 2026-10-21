@@ -9,7 +9,7 @@ import type {
   Topic,
 } from "../domain/article";
 import type { FeedCursor } from "../domain/pagination";
-import { validateExplanation } from "../domain/explanation";
+import { validateExplanation, type Explanation } from "../domain/explanation";
 import { estimateReadingMinutes } from "../domain/source";
 
 type ArticleRow = {
@@ -511,17 +511,28 @@ export async function approveRevision(
   const validated = validateExplanation(parsedContent);
   if (!validated.ok) return null;
 
-  const readingMinutes = validated.value.readingMinutes;
-  const contextHeadline = validated.value.contextHeadline;
-  const dek = validated.value.dek;
-  const topicId = validated.value.topic;
+  const results = await db.batch(publicationStatements(db, revisionId, revision.article_id, validated.value, reviewer, note));
+  return (results[0]?.meta.changes ?? 0) > 0 ? { articleId: revision.article_id, slug: revision.slug } : null;
+}
 
+function publicationStatements(
+  db: D1Database,
+  revisionId: string,
+  articleId: string,
+  explanation: Explanation,
+  reviewer: string,
+  note: string | null,
+  lease?: Job,
+): D1PreparedStatement[] {
+  const { readingMinutes, contextHeadline, dek, topic: topicId } = explanation;
   const now = new Date().toISOString();
   const reviewId = crypto.randomUUID();
-  const results = await db.batch([
+  return [
     db.prepare(`INSERT INTO reviews (id, revision_id, decision, note, reviewer, created_at)
-      SELECT ?, id, 'approved', ?, ?, ? FROM explanation_revisions WHERE id = ? AND status = 'draft'`)
-      .bind(reviewId, note, reviewer, now, revisionId),
+      SELECT ?, id, 'approved', ?, ?, ? FROM explanation_revisions WHERE id = ? AND status = 'draft'
+      ${lease ? `AND changes() = 1 AND article_id = ? AND ${CURRENT_LEASE_SQL}` : ""}`)
+       .bind(reviewId, note, reviewer, now, revisionId,
+         ...(lease ? [lease.articleId, ...leaseValues(lease)] : [])),
     db
       .prepare(
         `UPDATE explanation_revisions
@@ -532,7 +543,7 @@ export async function approveRevision(
     db.prepare(`UPDATE explanation_revisions SET status = 'approved'
       WHERE article_id = ? AND status = 'published' AND id != ?
       AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`)
-      .bind(revision.article_id, revisionId, reviewId),
+       .bind(articleId, revisionId, reviewId),
     db
       .prepare(
         `UPDATE articles
@@ -540,7 +551,7 @@ export async function approveRevision(
              context_headline = ?, dek = ?, topic_id = ?, updated_at = ?
           WHERE id = ? AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
       )
-      .bind(revisionId, readingMinutes, contextHeadline, dek, topicId, now, revision.article_id, reviewId),
+       .bind(revisionId, readingMinutes, contextHeadline, dek, topicId, now, articleId, reviewId),
     db
       .prepare(
         `INSERT INTO article_topics (article_id, topic_id)
@@ -548,15 +559,13 @@ export async function approveRevision(
           AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)
          ON CONFLICT DO NOTHING`,
       )
-      .bind(revision.article_id, topicId, topicId, reviewId),
+       .bind(articleId, topicId, topicId, reviewId),
     db
       .prepare(
         `UPDATE meta SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
           WHERE key = 'publication_version' AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
       ).bind(reviewId),
-  ]);
-
-  return (results[0]?.meta.changes ?? 0) > 0 ? { articleId: revision.article_id, slug: revision.slug } : null;
+  ];
 }
 
 export async function rejectRevision(
@@ -890,8 +899,15 @@ export async function insertRevision(
     schemaVersion: string;
   },
   lease: Job,
+  autoPublication?: { reviewer: string },
 ): Promise<boolean> {
-  const result = await db
+  let explanation: Explanation | null = null;
+  if (autoPublication) {
+    const validated = validateExplanation(JSON.parse(input.contentJson));
+    if (!validated.ok) throw new Error("Automatic publication requires a valid explanation.");
+    explanation = validated.value;
+  }
+  const statement = db
     .prepare(
       `INSERT INTO explanation_revisions
         (id, article_id, snapshot_id, status, content_json, provenance_json, model_id, prompt_version, schema_version)
@@ -908,8 +924,19 @@ export async function insertRevision(
       input.promptVersion,
       input.schemaVersion,
       input.articleId, lease.articleId, ...leaseValues(lease),
-    )
-    .run();
+    );
+
+  if (autoPublication && explanation) {
+    // Only this transaction's newly inserted revision can authorize publication.
+    // Conflicts, expired leases, and replaced workers cannot publish an old draft.
+    const results = await db.batch([
+      statement,
+      ...publicationStatements(db, input.id, input.articleId, explanation,
+        autoPublication.reviewer, "Automatically published after validation.", lease),
+    ]);
+    return (results[0]?.meta.changes ?? 0) > 0 && (results[1]?.meta.changes ?? 0) > 0;
+  }
+  const result = await statement.run();
   return (result.meta?.changes ?? 0) > 0;
 }
 

@@ -42,8 +42,8 @@ export async function renderFeed(c: Context<AppEnv>) {
 
   const title = topic ? `${topic.label} explainers` : "Understory";
   const description = topic
-    ? topic.description ?? `Reviewed explainers about ${topic.label.toLowerCase()}.`
-    : "Engineering blogs, explained. The latest posts turned into reviewed explainers with context, diagrams, and sources.";
+      ? topic.description ?? `Explainers about ${topic.label.toLowerCase()}.`
+    : "Engineering blogs, explained. The latest posts turned into explainers with context, diagrams, and sources.";
   const path = topic ? `/?topic=${encodeURIComponent(topic.id)}` : "/";
 
   return c.render(
@@ -60,12 +60,12 @@ export async function renderFeed(c: Context<AppEnv>) {
           <div class="index-intro__copy">
             <h1 id="index-title">Engineering blogs, explained.</h1>
             <p class="index-intro__dek">
-              The latest posts from engineering blogs, turned into reviewed explainers. Context,
+              The latest posts from engineering blogs, turned into explainers. Context,
               mechanism, diagrams, and the trade-offs the announcement leaves out.
             </p>
           </div>
           <div class="index-intro__stamp" aria-label="Edition summary">
-            <span class="field-label">Latest edition</span>
+            <span class="field-label">Latest article</span>
             <strong>{lead ? formatDate(lead.publishedAt) : formatDate(new Date().toISOString())}</strong>
             <span>{site.published} explainers / {site.sources} sources</span>
           </div>

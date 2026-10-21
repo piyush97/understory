@@ -7,24 +7,22 @@ import { IconArrowUpRight } from "../components/icons";
 
 const pipelineDiagram: Diagram = {
   kind: "flow",
-  title: "From a link to a reviewed sheet",
+  title: "From a link to a validated sheet",
   description:
-    "Discovery, extraction, generation, validation, and review run as separate steps. A failed step stays in the queue and does not reach the public index.",
+    "Discovery, extraction, generation, and validation run before publication. Valid new generations can publish automatically; failed validation never reaches the public index.",
   conceptual: true,
   nodes: [
     { id: "discover", label: "Discover", detail: "engineeringblogs.xyz" },
     { id: "extract", label: "Extract", detail: "article text and structure" },
     { id: "draft", label: "Draft", detail: "Workers AI, bounded" },
     { id: "validate", label: "Validate", detail: "schema, citations, diagram" },
-    { id: "review", label: "Review", detail: "a person decides" },
     { id: "publish", label: "Publish", detail: "immutable revision" },
   ],
   edges: [
     { from: "discover", to: "extract" },
     { from: "extract", to: "draft" },
     { from: "draft", to: "validate" },
-    { from: "validate", to: "review" },
-    { from: "review", to: "publish" },
+    { from: "validate", to: "publish" },
   ],
   caption:
     "The queue and D1 job rows make each step retryable. The public site never calls a model on a reader request.",
@@ -34,7 +32,7 @@ export function renderAbout(c: Context<AppEnv>) {
   return c.render(
     <Layout
       title="About"
-      description="How Understory turns engineering blog posts into reviewed explainers, what it will not do, and how the free-tier budget works."
+      description="How Understory turns engineering blog posts into validated explainers, what it will not do, and how the free-tier budget works."
       path="/about"
       site={c.get("site")}
       siteUrl={c.env.SITE_URL}
@@ -63,7 +61,7 @@ export function renderAbout(c: Context<AppEnv>) {
                 then records new links in D1. A queue job fetches the article, extracts readable
                 blocks, and stores a snapshot with a content hash. A second job asks Workers AI
                 for a structured explanation. The draft is validated against a schema before it
-                can enter the review queue.
+                can be published automatically or held for manual review.
               </p>
               <p>
                 Validation is not a spell check. Every citation must point to a source entry, every
@@ -73,9 +71,10 @@ export function renderAbout(c: Context<AppEnv>) {
               </p>
               <DiagramPlate diagram={pipelineDiagram} figure="A" compact />
               <p>
-                A person reviews the draft against the snapshot. Approving it writes an immutable
-                revision, points the article at that revision, and increments the publication
-                version. The public pages are precomputed. Readers never wait for a model.
+                With automatic publishing enabled, new drafts that pass validation go live without
+                human review. Existing drafts remain in the private admin desk for manual approval.
+                Publication updates the article and the cache version. Automated checks cannot
+                guarantee factual accuracy. Readers never wait for a model.
               </p>
             </section>
 
@@ -118,7 +117,7 @@ export function renderAbout(c: Context<AppEnv>) {
                 <li>No arbitrary URL ingestion and no unrestricted URL proxy.</li>
                 <li>No model inference on a reader request, and no chat with the article.</li>
                 <li>No public reproduction of the full original text. Links and short quotes only.</li>
-                <li>No claim that a generated draft is a fact-check. A person reviews it first.</li>
+                <li>No claim that automated validation is human review or a factual guarantee.</li>
               </ul>
             </section>
 
