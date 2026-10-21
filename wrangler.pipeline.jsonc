@@ -47,5 +47,6 @@
   },
   "observability": {
     "enabled": true
-  }
+  },
+  "previews": {}
 }
