@@ -1,11 +1,13 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import app from "../src/web/index";
 import type { Bindings } from "../src/shared/env";
+import * as dbModule from "../src/infrastructure/db";
 
 const db = vi.hoisted(() => ({ approveRevision: vi.fn(), listReviewQueue: vi.fn() }));
 vi.mock("../src/infrastructure/db", () => ({
   ...db,
   getSiteState: vi.fn(async () => ({ publicationVersion: "1" })),
+  getPublicationVersion: vi.fn(async () => "1"),
   getRevisionDetail: vi.fn(), rejectRevision: vi.fn(),
 }));
 
@@ -32,6 +34,15 @@ beforeAll(async () => {
   jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+describe("public cache", () => {
+  it("serves a cached page without counting site state", async () => {
+    vi.stubGlobal("caches", { default: { match: async () => new Response("cached"), put: async () => {} } });
+    const response = await app.fetch(new Request("https://example.com/"), env, { waitUntil() {} } as unknown as ExecutionContext);
+    expect(await response.text()).toBe("cached");
+    expect(dbModule.getSiteState).not.toHaveBeenCalled();
+  });
+});
 
 describe("admin Access authentication", () => {
   it("rejects a spoofed email header even with the editorial token", async () => {

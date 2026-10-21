@@ -6,7 +6,7 @@ import type { Bindings } from "../src/shared/env";
 import { explanation, seed, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const mocks = vi.hoisted(() => ({ generate: vi.fn(), fetchPage: vi.fn(), extract: vi.fn(), snapshot: vi.fn(), discovery: vi.fn() }));
-vi.mock("../src/pipeline/generate", () => ({ attemptGeneration: mocks.generate }));
+vi.mock("../src/pipeline/generate", async (importOriginal) => ({ ...(await importOriginal<typeof import("../src/pipeline/generate")>()), attemptGeneration: mocks.generate }));
 vi.mock("../src/pipeline/extract", () => ({ fetchArticlePage: mocks.fetchPage, extractArticle: mocks.extract, toSnapshot: mocks.snapshot }));
 vi.mock("../src/pipeline/discovery", () => ({ parseDiscoveryHtml: mocks.discovery }));
 

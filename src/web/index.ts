@@ -72,17 +72,22 @@ app.use("*", async (c, next) => {
   await next();
 });
 
+// Public pages load counts inside cachePage on a cache miss only; the admin
+// desk always needs them. This keeps cached views at zero counting queries.
 app.use("*", async (c, next) => {
-  try {
-    c.set("site", await getSiteState(c.env.DB));
-  } catch {
-    c.set("site", {
-      published: 0,
-      sources: 0,
-      topics: 0,
-      inReview: 0,
-      publicationVersion: "0",
-    });
+  const admin = c.req.path === "/admin" || c.req.path.startsWith("/admin/");
+  if (admin) {
+    try {
+      c.set("site", await getSiteState(c.env.DB));
+    } catch {
+      c.set("site", {
+        published: 0,
+        sources: 0,
+        topics: 0,
+        inReview: 0,
+        publicationVersion: "0",
+      });
+    }
   }
   await next();
 });

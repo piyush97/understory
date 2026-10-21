@@ -374,3 +374,18 @@ function toTokenUsage(
     outputTokens: usage.completion_tokens ?? null,
   };
 }
+
+// Neurons per million tokens, from Workers AI pricing. Unknown models fall
+// back to the caller's conservative estimate.
+const NEURON_RATES: Record<string, { input: number; output: number }> = {
+  "@cf/qwen/qwen3-30b-a3b-fp8": { input: 4625, output: 30475 },
+};
+
+export function neuronsFromUsage(
+  usage: GenerationAttempt["usage"],
+  model = "@cf/qwen/qwen3-30b-a3b-fp8",
+): number | null {
+  const rate = NEURON_RATES[model];
+  if (!rate || !usage || (usage.inputTokens === null && usage.outputTokens === null)) return null;
+  return Math.ceil(((usage.inputTokens ?? 0) * rate.input + (usage.outputTokens ?? 0) * rate.output) / 1_000_000);
+}

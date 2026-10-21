@@ -37,7 +37,7 @@ import { dailyNeuronBudget, type Bindings, type QueueMessage } from "../shared/e
 import { fetchPublicText } from "../shared/fetch";
 import { parseDiscoveryHtml } from "./discovery";
 import { extractArticle, fetchArticlePage, toSnapshot } from "./extract";
-import { attemptGeneration } from "./generate";
+import { attemptGeneration, neuronsFromUsage } from "./generate";
 import { PROMPT_VERSION, SCHEMA_VERSION, type GenerationMaterial } from "./prompt";
 
 const ESTIMATED_NEURONS_PER_ATTEMPT = 500;
@@ -340,9 +340,7 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
       await releaseBudgetReservation(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT);
       throw error;
     }
-    // The API does not expose an exact neuron count. Keep the reservation
-    // ledger conservative by recording the estimate as spent.
-    await recordBudgetUsage(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT, null);
+    await recordBudgetUsage(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT, neuronsFromUsage(generation.usage));
 
     if (generation.ok) break;
     previous = { rawText: generation.rawText, issues: generation.issues };
