@@ -162,6 +162,13 @@ npm run deploy:pipeline
 npm run deploy:web
 ```
 
+For Cloudflare Workers Builds, use `npm run build` (or `bun run build`) as the build
+command. It typechecks and bundles both Workers without deploying. For the web
+Worker, set the deploy command to `npm run deploy:web` and the preview/non-production
+command to `npx wrangler versions upload --config wrangler.web.jsonc`.
+For a separate pipeline build integration, use `npm run deploy:pipeline` as its
+production deploy command.
+
 Install a strong, randomly generated editorial secret on both deployed Workers
 using Wrangler's interactive secret prompt (never commit or paste it into logs):
 
