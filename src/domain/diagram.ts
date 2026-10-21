@@ -108,7 +108,7 @@ function renderNode(
   <text class="dg-node-label" x="${pos.x + 12}" y="${pos.y + 27}">${label}</text>
   ${detail ? `<text class="dg-node-detail" x="${pos.x + 12}" y="${detailY}">${detail}</text>` : ""}
   ${cite}
-  <text class="dg-node-id" x="${pos.x + 12}" y="${pos.y + NODE_H - 5}">${escapeXml(node.id.toUpperCase())}</text>
+  <text class="dg-node-id" x="${pos.x + 12}" y="${pos.y + NODE_H - 5}">${escapeXml(truncate(node.id.toUpperCase(), 18))}</text>
 </g>`;
 }
 

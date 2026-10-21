@@ -1,0 +1,13 @@
+/assets/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/assets/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/styles.css
+  Cache-Control: public, max-age=300, must-revalidate
+
+/assets/app.js
+  Cache-Control: public, max-age=300, must-revalidate

@@ -254,3 +254,21 @@ describe("model calls", () => {
     expect(dailyNeuronBudget("not-a-number")).toBe(8000);
   });
 });
+
+import { neuronsFromUsage } from "../src/pipeline/generate";
+
+describe("neuronsFromUsage", () => {
+  it("prices tokens at qwen3-30b rates", () => {
+    expect(neuronsFromUsage({ inputTokens: 1_000_000, outputTokens: 0 })).toBe(4625);
+    expect(neuronsFromUsage({ inputTokens: 0, outputTokens: 1_000_000 })).toBe(30475);
+    expect(neuronsFromUsage({ inputTokens: 9_000, outputTokens: 4_000 })).toBe(164);
+  });
+  it("falls back to the estimate for models without known rates", () => {
+    expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/meta/llama-unknown")).toBeNull();
+    expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/qwen/qwen3-30b-a3b-fp8")).toBe(36);
+  });
+  it("returns null without usable counts", () => {
+    expect(neuronsFromUsage(null)).toBeNull();
+    expect(neuronsFromUsage({ inputTokens: null, outputTokens: null })).toBeNull();
+  });
+});

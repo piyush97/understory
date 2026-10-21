@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJob } from "../src/infrastructure/db";
-import { processJob, runDiscovery } from "../src/pipeline/run";
+import { processJob, runDiscovery, runScheduled } from "../src/pipeline/run";
 import { PROMPT_VERSION, SCHEMA_VERSION } from "../src/pipeline/prompt";
 import type { Bindings } from "../src/shared/env";
 import { explanation, seed, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const mocks = vi.hoisted(() => ({ generate: vi.fn(), fetchPage: vi.fn(), extract: vi.fn(), snapshot: vi.fn(), discovery: vi.fn() }));
-vi.mock("../src/pipeline/generate", () => ({ attemptGeneration: mocks.generate }));
+vi.mock("../src/pipeline/generate", async (importOriginal) => ({ ...(await importOriginal<typeof import("../src/pipeline/generate")>()), attemptGeneration: mocks.generate }));
 vi.mock("../src/pipeline/extract", () => ({ fetchArticlePage: mocks.fetchPage, extractArticle: mocks.extract, toSnapshot: mocks.snapshot }));
 vi.mock("../src/pipeline/discovery", () => ({ parseDiscoveryHtml: mocks.discovery }));
 
@@ -120,6 +120,34 @@ describe("pipeline consistency", () => {
     await processJob(env, "job");
     expect(mocks.generate).toHaveBeenCalledTimes(1);
     expect(store.sqlite.prepare("SELECT used_neurons, reserved_neurons FROM ai_budget").get()).toMatchObject({ used_neurons: 500, reserved_neurons: 0 });
+  });
+  it("spaces discovery across cron runs", async () => {
+    const now = new Date("2026-10-20T12:00:00.000Z");
+    store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run(new Date(now.getTime() - 11 * 60_000).toISOString());
+    await runScheduled(env, now);
+    expect((env.PIPELINE_QUEUE.send as ReturnType<typeof vi.fn>).mock.calls).not.toContainEqual([{ kind: "discover", reason: "cron" }]);
+  });
+  it("retires a rejected generation instead of retrying the whole job", async () => {
+    await generateJob();
+    mocks.generate.mockResolvedValue({ ok: false, explanation: null, issues: [{ path: "headline", message: "too long" }], rawText: "{}", usage: { inputTokens: 9000, outputTokens: 4000 } });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT state FROM jobs").get()?.state).toBe("failed");
+  });
+  it("looks up known discovery posts in one query", async () => {
+    const post = { url: "https://example.com/post", publishedAt: new Date().toISOString(), sourceSiteUrl: "https://example.com", title: "Test article", sourceName: "Source" };
+    mocks.discovery.mockReturnValue(Array.from({ length: 30 }, () => post));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html></html>")));
+    const counted: string[] = [];
+    const countedDb = new Proxy(store.db, {
+      get(target, prop, receiver) {
+        if (prop === "prepare") return (sql: string) => { counted.push(sql); return (target as unknown as D1Database).prepare(sql); };
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    await runDiscovery({ ...env, DB: countedDb }, "test");
+    expect(counted.filter((sql) => /canonical_url\s*=\s*\?/.test(sql))).toHaveLength(0);
+    expect(counted.filter((sql) => /canonical_url\s+IN\s*\(/.test(sql))).toHaveLength(1);
   });
   it("reconciles previously discovered articles without an extraction job", async () => {
     store.sqlite.exec("UPDATE articles SET status = 'discovered'");

@@ -1,16 +1,26 @@
 import type { Context } from "hono";
+import { getSiteState } from "../../infrastructure/db";
 import type { AppEnv } from "../../shared/env";
 import { Layout } from "../components/layout";
 import { IconArrowLeft } from "../components/icons";
 
-export function renderNotFound(c: Context<AppEnv>) {
-  const site = c.get("site") ?? {
-    published: 0,
-    sources: 0,
-    topics: 0,
-    inReview: 0,
-    publicationVersion: "0",
-  };
+async function siteFor(c: Context<AppEnv>) {
+  if (c.get("site")) return c.get("site")!;
+  try {
+    return await getSiteState(c.env.DB);
+  } catch {
+    return {
+      published: 0,
+      sources: 0,
+      topics: 0,
+      inReview: 0,
+      publicationVersion: "0",
+    };
+  }
+}
+
+export async function renderNotFound(c: Context<AppEnv>) {
+  const site = await siteFor(c);
   c.status(404);
   return c.render(
     <Layout
@@ -38,14 +48,8 @@ export function renderNotFound(c: Context<AppEnv>) {
   );
 }
 
-export function renderError(c: Context<AppEnv>) {
-  const site = c.get("site") ?? {
-    published: 0,
-    sources: 0,
-    topics: 0,
-    inReview: 0,
-    publicationVersion: "0",
-  };
+export async function renderError(c: Context<AppEnv>) {
+  const site = await siteFor(c);
   c.status(500);
   return c.render(
     <Layout

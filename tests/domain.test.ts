@@ -144,6 +144,14 @@ describe("diagram rendering", () => {
     }
   });
 
+  it("keeps long node ids inside their box", () => {
+    const longId = "a-very-long-node-identifier-xyz";
+    const svg = renderDiagramSvg({ ...explanation.diagram, nodes: [{ id: longId, label: "Node" }], edges: [] });
+    const id = svg.match(/class="dg-node-id"[^>]*>([^<]*)</)?.[1] ?? "";
+    expect(id.length).toBeLessThanOrEqual(18);
+    expect(svg).toContain(`data-node="${longId}"`);
+  });
+
   it("escapes labels instead of allowing markup injection", () => {
     const diagram = explanation.diagram;
     const svg = renderDiagramSvg({

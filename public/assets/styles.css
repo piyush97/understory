@@ -43,6 +43,7 @@
 
 :root {
   color-scheme: light;
+  --fs-label: 11px;
   --paper: #f4f2ec;
   --paper-2: #ece9e0;
   --sheet: #fbfaf6;
@@ -207,7 +208,7 @@ ol {
 .rail-label {
   display: inline-block;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   font-weight: 500;
   letter-spacing: 0.12em;
   line-height: 1.4;
@@ -284,7 +285,7 @@ ol {
   padding-left: 14px;
   border-left: 1px solid var(--rule);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.1em;
   line-height: 1.5;
   text-transform: uppercase;
@@ -297,7 +298,7 @@ ol {
   align-items: flex-end;
   gap: 2px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.1em;
   line-height: 1.5;
   text-transform: uppercase;
@@ -362,7 +363,7 @@ ol {
 
 .masthead__meta {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.07em;
   line-height: 1;
   text-transform: uppercase;
@@ -479,7 +480,7 @@ ol {
 
 .section-head__meta {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   line-height: 1.5;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -520,7 +521,7 @@ ol {
   border-radius: 0;
   background: transparent;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   font-weight: 500;
   letter-spacing: 0.08em;
   line-height: 1.2;
@@ -564,11 +565,12 @@ ol {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  min-height: 44px;
   padding: 4px 0;
   border: 0;
   background: transparent;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--muted);
@@ -654,7 +656,7 @@ html:not(.js) .js-only {
 .index-intro__stamp > span:last-child {
   display: block;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   line-height: 1.6;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -672,9 +674,12 @@ html:not(.js) .js-only {
 }
 
 .topic-strip__item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   padding: 9px 14px 8px 0;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.07em;
   line-height: 1.3;
   text-transform: uppercase;
@@ -732,7 +737,7 @@ html:not(.js) .js-only {
   gap: 12px;
   margin-bottom: 16px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   line-height: 1.3;
   text-transform: uppercase;
@@ -806,7 +811,7 @@ html:not(.js) .js-only {
   gap: 4px;
   margin-top: 20px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.05em;
   line-height: 1.6;
   text-transform: uppercase;
@@ -883,7 +888,7 @@ html:not(.js) .js-only {
   align-items: center;
   gap: 10px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.07em;
   line-height: 1.4;
   text-transform: uppercase;
@@ -950,7 +955,7 @@ html:not(.js) .js-only {
 
 .feed-item__origin-label {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   font-style: normal;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -968,7 +973,7 @@ html:not(.js) .js-only {
   gap: 4px;
   margin-top: 14px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.04em;
   line-height: 1.6;
   text-transform: uppercase;
@@ -1075,7 +1080,7 @@ html:not(.js) .js-only {
   gap: 8px;
   padding: 36px 0 20px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.07em;
   line-height: 1.4;
   text-transform: uppercase;
@@ -1120,7 +1125,7 @@ html:not(.js) .js-only {
   gap: 4px;
   margin-top: 22px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.05em;
   line-height: 1.7;
   text-transform: uppercase;
@@ -1142,7 +1147,7 @@ html:not(.js) .js-only {
 
 .article-actions .save-button {
   padding: 0 4px;
-  font-size: 9px;
+  font-size: var(--fs-label);
 }
 
 .article-layout {
@@ -1190,7 +1195,7 @@ html:not(.js) .js-only {
 
 .contents-list__num {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   line-height: 1.7;
   color: var(--redline);
 }
@@ -1201,7 +1206,7 @@ html:not(.js) .js-only {
   gap: 4px;
   margin-top: 14px;
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   text-decoration: none;
@@ -1271,7 +1276,7 @@ html:not(.js) .js-only {
 .article-main blockquote footer {
   margin-top: 8px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   font-style: normal;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1280,7 +1285,7 @@ html:not(.js) .js-only {
 
 .cite {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   line-height: 0;
   vertical-align: super;
 }
@@ -1316,7 +1321,7 @@ html:not(.js) .js-only {
 .article-section__num {
   flex: 0 0 32px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   font-weight: 400;
   line-height: 1.6;
   letter-spacing: 0.04em;
@@ -1372,7 +1377,7 @@ html:not(.js) .js-only {
 .summary-list__num {
   padding-top: 3px;
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   line-height: 1.4;
   letter-spacing: 0.05em;
   color: var(--redline);
@@ -1413,7 +1418,7 @@ html:not(.js) .js-only {
   padding: 7px 10px;
   border-top: 1px solid var(--rule);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   line-height: 1.5;
   color: var(--muted);
 }
@@ -1433,7 +1438,7 @@ html:not(.js) .js-only {
 .note__title {
   margin-bottom: 7px !important;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--redline);
@@ -1467,7 +1472,7 @@ html:not(.js) .js-only {
   padding: 7px 11px;
   border-bottom: 1px solid var(--rule);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.1em;
   line-height: 1.4;
   text-transform: uppercase;
@@ -1527,7 +1532,7 @@ html:not(.js) .js-only {
 
 .diagram-caption__note {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   line-height: 1.55;
   letter-spacing: 0.02em;
   color: var(--muted);
@@ -1577,7 +1582,7 @@ html:not(.js) .js-only {
 .dg-node-id {
   fill: var(--faint);
   font-family: var(--mono);
-  font-size: 7px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
 }
 
@@ -1632,8 +1637,11 @@ html:not(.js) .js-only {
 .dg-message-label {
   fill: var(--muted);
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.04em;
+  paint-order: stroke;
+  stroke: var(--sheet);
+  stroke-width: 3px;
 }
 
 /* ELI5 */
@@ -1708,7 +1716,7 @@ html:not(.js) .js-only {
 
 .tradeoff__num {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   color: var(--redline);
 }
 
@@ -1813,7 +1821,7 @@ html:not(.js) .js-only {
   padding: 2px 4px;
   border: 1px solid var(--redline-soft);
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   line-height: 1.4;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1837,7 +1845,7 @@ html:not(.js) .js-only {
   max-width: 64ch;
   margin-top: 14px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   line-height: 1.65;
   letter-spacing: 0.01em;
   color: var(--muted);
@@ -1875,7 +1883,7 @@ html:not(.js) .js-only {
 
 .record-grid dt {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.09em;
   line-height: 1.5;
   text-transform: uppercase;
@@ -1917,7 +1925,7 @@ html:not(.js) .js-only {
 }
 
 .sheet-card__head .mono {
-  font-size: 8px;
+  font-size: var(--fs-label);
   color: var(--redline);
 }
 
@@ -1936,7 +1944,7 @@ html:not(.js) .js-only {
 
 .sheet-fields dt {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.09em;
   line-height: 1.4;
   text-transform: uppercase;
@@ -2039,7 +2047,7 @@ html:not(.js) .js-only {
 
 .related-card__source {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--redline);
@@ -2055,7 +2063,7 @@ html:not(.js) .js-only {
 .related-card__meta {
   margin-top: auto;
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
@@ -2088,7 +2096,7 @@ html:not(.js) .js-only {
 .topic-row__num {
   padding-top: 5px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   color: var(--redline);
 }
 
@@ -2118,7 +2126,7 @@ html:not(.js) .js-only {
   gap: 6px;
   padding-top: 7px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
@@ -2146,7 +2154,7 @@ html:not(.js) .js-only {
 
 .source-table__head {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.09em;
   line-height: 1.4;
   text-transform: uppercase;
@@ -2275,7 +2283,7 @@ html:not(.js) .js-only {
 
 .budget-table__row--head {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -2289,7 +2297,7 @@ html:not(.js) .js-only {
 
 .about-fineprint {
   font-family: var(--mono);
-  font-size: 9px !important;
+  font-size: var(--fs-label) !important;
   line-height: 1.65 !important;
   letter-spacing: 0.01em;
   color: var(--muted) !important;
@@ -2334,7 +2342,7 @@ html:not(.js) .js-only {
 .bookmarks-count {
   margin-top: 14px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
@@ -2448,7 +2456,7 @@ html:not(.js) .js-only {
 
 .admin-table__head {
   font-family: var(--mono);
-  font-size: 8px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -2460,7 +2468,7 @@ html:not(.js) .js-only {
 }
 
 .admin-table__id {
-  font-size: 9px !important;
+  font-size: var(--fs-label) !important;
   color: var(--redline);
 }
 
@@ -2474,7 +2482,7 @@ html:not(.js) .js-only {
 }
 
 .admin-table__action .text-link {
-  font-size: 8px;
+  font-size: var(--fs-label);
 }
 
 .admin-help {
@@ -2500,7 +2508,7 @@ html:not(.js) .js-only {
 
 .admin-help__fineprint {
   font-family: var(--mono);
-  font-size: 9px !important;
+  font-size: var(--fs-label) !important;
   line-height: 1.65 !important;
 }
 
@@ -2523,7 +2531,7 @@ html:not(.js) .js-only {
 .login-sheet__meta {
   margin-bottom: 12px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   line-height: 1.4;
   text-transform: uppercase;
@@ -2546,7 +2554,7 @@ html:not(.js) .js-only {
 .login-form label,
 .admin-action-form label {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -2596,7 +2604,7 @@ html:not(.js) .js-only {
 .admin-review-head__meta {
   margin-top: 9px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
@@ -2618,7 +2626,7 @@ html:not(.js) .js-only {
 
 .admin-preview__label {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--redline);
@@ -2807,7 +2815,7 @@ a.field-value {
 
 .footer-nav a {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: var(--fs-label);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   text-decoration: none;
@@ -2821,7 +2829,7 @@ a.field-value {
 .site-footer__stamp {
   padding-top: 2px;
   font-family: var(--mono);
-  font-size: 8px !important;
+  font-size: var(--fs-label) !important;
   letter-spacing: 0.04em;
   text-align: right;
   color: var(--faint) !important;
@@ -2937,7 +2945,7 @@ a.field-value {
   }
 
   .stamp {
-    font-size: 8px;
+    font-size: var(--fs-label);
   }
 
   .masthead__navrow {
@@ -2955,7 +2963,7 @@ a.field-value {
   }
 
   .nav__link {
-    font-size: 9px;
+    font-size: var(--fs-label);
     white-space: nowrap;
   }
 
@@ -3024,7 +3032,7 @@ a.field-value {
   }
 
   .feed-item__meta {
-    font-size: 8px;
+    font-size: var(--fs-label);
   }
 
   .bench-section {
@@ -3285,7 +3293,7 @@ a.field-value {
   }
 
   .lead__meta {
-    font-size: 8px;
+    font-size: var(--fs-label);
   }
 
   .lead__meta .save-button {

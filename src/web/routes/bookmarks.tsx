@@ -12,6 +12,7 @@ export function renderBookmarks(c: Context<AppEnv>) {
       site={c.get("site")}
       siteUrl={c.env.SITE_URL}
       active="bookmarks"
+      noindex
     >
       <div class="page page--index">
         <header class="page-head">
