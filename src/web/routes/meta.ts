@@ -22,11 +22,20 @@ export function renderRobots(c: Context<AppEnv>) {
 
 export async function renderSitemap(c: Context<AppEnv>) {
   const [articles] = await Promise.all([listAllPublished(c.env.DB)]);
+  // Topic pages are indexable (own title + canonical); list those with published articles.
+  const topicLastmod = new Map<string, string>();
+  for (const article of articles) {
+    if (article.topicId && !topicLastmod.has(article.topicId)) topicLastmod.set(article.topicId, article.updatedAt.slice(0, 10));
+  }
   const urls = [
     { loc: absoluteUrl(c.env.SITE_URL, "/"), lastmod: null },
     { loc: absoluteUrl(c.env.SITE_URL, "/topics"), lastmod: null },
     { loc: absoluteUrl(c.env.SITE_URL, "/sources"), lastmod: null },
     { loc: absoluteUrl(c.env.SITE_URL, "/about"), lastmod: null },
+    ...[...topicLastmod].map(([topic, lastmod]) => ({
+      loc: absoluteUrl(c.env.SITE_URL, `/?topic=${encodeURIComponent(topic)}`),
+      lastmod,
+    })),
     ...articles.map((article) => ({
       loc: absoluteUrl(c.env.SITE_URL, `/articles/${article.slug}`),
       lastmod: article.updatedAt.slice(0, 10),
