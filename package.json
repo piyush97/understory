@@ -13,10 +13,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "wrangler dev --config wrangler.web.jsonc --port 8790",
+    "dev": "wrangler dev --config wrangler.jsonc --port 8790",
     "dev:pipeline": "wrangler dev --config wrangler.pipeline.jsonc --port 8791",
-    "db:migrate": "wrangler d1 migrations apply understory --local --config wrangler.web.jsonc",
-    "db:migrate:remote": "wrangler d1 migrations apply understory --remote --config wrangler.web.jsonc",
+    "db:migrate": "wrangler d1 migrations apply understory --local --config wrangler.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply understory --remote --config wrangler.jsonc",
     "db:seed": "tsx scripts/seed.ts --local",
     "db:seed:remote": "tsx scripts/seed.ts --remote",
     "db:setup": "npm run db:migrate && npm run db:seed",
@@ -24,8 +24,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run test",
-    "build": "npm run typecheck && wrangler deploy --dry-run --config wrangler.web.jsonc --outdir .tmp/build/web && wrangler deploy --dry-run --config wrangler.pipeline.jsonc --outdir .tmp/build/pipeline",
-    "deploy:web": "wrangler deploy --config wrangler.web.jsonc",
+    "build": "npm run typecheck && wrangler deploy --dry-run --config wrangler.jsonc --outdir .tmp/build/web && wrangler deploy --dry-run --config wrangler.pipeline.jsonc --outdir .tmp/build/pipeline",
+    "deploy:web": "wrangler deploy --config wrangler.jsonc",
     "deploy:pipeline": "wrangler deploy --config wrangler.pipeline.jsonc"
   },
   "dependencies": {

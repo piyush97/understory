@@ -165,7 +165,7 @@ npm run deploy:web
 For Cloudflare Workers Builds, use `npm run build` (or `bun run build`) as the build
 command. It typechecks and bundles both Workers without deploying. For the web
 Worker, set the deploy command to `npm run deploy:web` and the preview/non-production
-command to `npx wrangler versions upload --config wrangler.web.jsonc`.
+command to `npx wrangler versions upload --config wrangler.jsonc`.
 For a separate pipeline build integration, use `npm run deploy:pipeline` as its
 production deploy command.
 
@@ -173,7 +173,7 @@ Install a strong, randomly generated editorial secret on both deployed Workers
 using Wrangler's interactive secret prompt (never commit or paste it into logs):
 
 ```bash
-npx wrangler secret put ADMIN_TOKEN --config wrangler.web.jsonc
+npx wrangler secret put ADMIN_TOKEN --config wrangler.jsonc
 npx wrangler secret put ADMIN_TOKEN --config wrangler.pipeline.jsonc
 ```
 
@@ -184,7 +184,7 @@ in UTC (the next quarter-hour). To remove automatic discovery, remove its
 generation, not discovery.
 
 Optional hardening: put Cloudflare Access in front of `/admin`, set the
-`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` values in `wrangler.web.jsonc` (the
+`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` values in `wrangler.jsonc` (the
 `ACCESS_AUD` value is the application audience tag shown in the Access
 application overview), then set `REQUIRE_ACCESS_JWT="true"` on the web Worker.
 The Worker requires both the editorial token and a valid signed Access

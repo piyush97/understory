@@ -152,7 +152,7 @@ if (!printOnly) {
     "execute",
     "understory",
     "--config",
-    "wrangler.web.jsonc",
+    "wrangler.jsonc",
     remote ? "--remote" : "--local",
     "--file",
     ".tmp/seed.sql",
