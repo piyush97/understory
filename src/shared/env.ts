@@ -13,6 +13,7 @@ export type Bindings = {
   SITE_URL: string;
   AI_MODEL?: string;
   DAILY_NEURON_BUDGET?: string;
+  AUTO_PUBLISH?: string;
   DISCOVERY_URL?: string;
   OPML_URL?: string;
   REQUIRE_ACCESS_JWT?: string;

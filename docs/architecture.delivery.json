@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "0d89d847-b271-4878-a445-ba026a53d108",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/root/Projects/understory/.archify/architecture-understory-20261020-131319/candidate.json",
+  "output": "/root/Projects/understory/docs/architecture.html",
+  "specification": {
+    "sha256": "1a5bb1a49aa0c8a5fc559444a694da9617d4d41f8d0cd149f3575713ea21eddc",
+    "bytes": 9345
+  },
+  "artifact": {
+    "sha256": "96437d71d4235a7cc783248407c8932e65c64fb5bed0ca0a8b2b76e24e9497d8",
+    "bytes": 839279
+  }
+}

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1258 712" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14" style="--flow-cycle: 3.600s; width: 1258px; height: 712px; min-width: 0px;" width="1258" height="712" xmlns="http://www.w3.org/2000/svg" data-theme="light"><style>
+<svg viewBox="0 0 1298 712" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" data-reader-fit="intrinsic-height" data-reader-min-text="7.5" data-reader-primary-text="14" style="--flow-cycle: 3.600s; width: 1298px; height: 712px; min-width: 0px;" width="1298" height="712" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -514,13 +514,13 @@ svg[data-preset="editorial"] { --flow-halo-peak: 0.07; --flow-glow-peak: 0.28; -
 @keyframes archify-relay-comet-10 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
   3.333% { opacity: var(--flow-peak, 0.9); }
-  34.025% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  38.469%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  20.437% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  24.881%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-10 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  34.025% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  59.025%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  20.437% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  45.437%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-node-0 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
@@ -584,9 +584,9 @@ svg[data-preset="editorial"] { --flow-halo-peak: 0.07; --flow-glow-peak: 0.28; -
 }
 @keyframes archify-relay-node-10 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  34.025% { filter: var(--ambient-node-base-filter, none); }
-  37.358%, 45.692% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  67.358% { filter: var(--ambient-node-base-filter, none); }
+  20.437% { filter: var(--ambient-node-base-filter, none); }
+  23.77%, 32.103% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  53.77% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-11 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
@@ -613,8 +613,12 @@ svg[data-node-ui] .phase-chip { stroke: var(--lane-stroke); stroke-width: 0.75px
 svg[data-node-ui] g[data-edge-from] &gt; rect.c-mask { rx: 7px; stroke: var(--lane-stroke); stroke-width: 0.75px; }
 svg[data-node-ui][data-preset="blueprint"] :is([data-graph-role="structural-frame-label-mask"], g[data-edge-from] &gt; rect.c-mask, .phase-chip) { rx: 2px; }
 svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-frame-label-mask"], g[data-edge-from] &gt; rect.c-mask, .phase-chip) { rx: 3px; }
-:root, svg { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #64748b; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; }
-</style><rect x="0" y="0" width="1258" height="712" fill="#f4f5f7"/>
+:root, svg { --bg: #020617; --grid: #1e293b; --canvas-dot: rgba(148, 163, 184, 0.16); --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #94a3b8; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; }
+@media (prefers-color-scheme: light) { :root, svg { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #64748b; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; } }
+svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #64748b; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; }
+svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --canvas-dot: rgba(148, 163, 184, 0.16); --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #94a3b8; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; }
+rect.c-bg-rect { fill: var(--bg); }
+</style><rect x="0" y="0" width="1298" height="712" class="c-bg-rect"/>
         <title id="archify-diagram-title">Understory system architecture</title>
         <desc id="archify-diagram-description">An architecture diagram generated by Archify.</desc>
         <!-- Definitions -->
@@ -661,7 +665,7 @@ svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-fram
         <rect width="100%" height="100%" fill="url(#grid)"/>
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Cloudflare account · free plan" x="262" y="196" width="956" height="448" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Cloudflare account · free plan" x="262" y="196" width="996" height="448" rx="12" class="c-region" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
         <g data-graph-role="automatic-crossover" style="--step:0">
@@ -682,28 +686,28 @@ svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-fram
           <path data-edge-from="web" data-edge-to="d1" data-edge-label="reads" data-edge-key="4" data-edge-id="web-to-d1" data-composition-points="470,398;530,398" data-composition-crossover="halo" data-composition-independent="true" d="M 470 398 L 530 398" class="a-default" data-animate="edge" style="--step: 4;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:5">
-          <path data-graph-role="automatic-crossover-underlay" d="M 770 398 L 710 398" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="pipeline" data-edge-to="d1" data-edge-label="drafts" data-edge-key="5" data-edge-id="pipeline-to-d1" data-composition-points="770,398;710,398" data-composition-crossover="halo" data-composition-independent="true" d="M 770 398 L 710 398" class="a-default" data-animate="edge" style="--step: 5;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 810 398 L 710 398" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="pipeline" data-edge-to="d1" data-edge-label="valid → publish" data-edge-key="5" data-edge-id="pipeline-to-d1" data-composition-points="810,398;710,398" data-composition-crossover="halo" data-composition-independent="true" d="M 810 398 L 710 398" class="a-default" data-animate="edge" style="--step: 5;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:6">
-          <path data-graph-role="automatic-crossover-underlay" d="M 960 398 L 1040 398" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="pipeline" data-edge-to="ai" data-edge-label="generate" data-edge-key="6" data-edge-id="pipeline-to-ai" data-composition-points="960,398;1040,398" data-composition-crossover="halo" data-composition-independent="true" d="M 960 398 L 1040 398" class="a-default" data-animate="edge" style="--step: 6;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1000 398 L 1080 398" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="pipeline" data-edge-to="ai" data-edge-label="generate" data-edge-key="6" data-edge-id="pipeline-to-ai" data-composition-points="1000,398;1080,398" data-composition-crossover="halo" data-composition-independent="true" d="M 1000 398 L 1080 398" class="a-default" data-animate="edge" style="--step: 6;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:7">
-          <path data-graph-role="automatic-crossover-underlay" d="M 865 436 L 865 560" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="pipeline" data-edge-to="queue" data-edge-label="async jobs" data-edge-key="7" data-edge-id="pipeline-to-queue" data-composition-points="865,436;865,560" data-composition-crossover="halo" data-composition-independent="true" d="M 865 436 L 865 560" class="a-dashed" data-animate="edge" style="--step: 7;" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 905 436 L 905 560" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="pipeline" data-edge-to="queue" data-edge-label="async jobs" data-edge-key="7" data-edge-id="pipeline-to-queue" data-composition-points="905,436;905,560" data-composition-crossover="halo" data-composition-independent="true" d="M 905 436 L 905 560" class="a-dashed" data-animate="edge" style="--step: 7;" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:8">
-          <path data-graph-role="automatic-crossover-underlay" d="M 1030 592 L 940 592" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="cron" data-edge-to="queue" data-edge-label="enqueue" data-edge-key="8" data-edge-id="cron-to-queue" data-composition-points="1030,592;940,592" data-composition-crossover="halo" data-composition-independent="true" d="M 1030 592 L 940 592" class="a-dashed" data-animate="edge" style="--step: 8;" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 1070 592 L 980 592" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="cron" data-edge-to="queue" data-edge-label="enqueue" data-edge-key="8" data-edge-id="cron-to-queue" data-composition-points="1070,592;980,592" data-composition-crossover="halo" data-composition-independent="true" d="M 1070 592 L 980 592" class="a-dashed" data-animate="edge" style="--step: 8;" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:9">
-          <path data-graph-role="automatic-crossover-underlay" d="M 858 360 L 858 154" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="pipeline" data-edge-to="engblogs" data-edge-label="fetch listing" data-edge-key="9" data-edge-id="pipeline-to-engblogs" data-composition-points="858,360;858,154" data-composition-crossover="halo" data-composition-independent="true" d="M 858 360 L 858 154" class="a-default" data-animate="edge" style="--step: 9;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 864 360 L 864 154" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="pipeline" data-edge-to="engblogs" data-edge-label="fetch listing" data-edge-key="9" data-edge-id="pipeline-to-engblogs" data-composition-points="864,360;864,154" data-composition-crossover="halo" data-composition-independent="true" d="M 864 360 L 864 154" class="a-default" data-animate="edge" style="--step: 9;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
         <g data-graph-role="automatic-crossover" style="--step:10">
-          <path data-graph-role="automatic-crossover-underlay" d="M 872 360 L 872 265 Q 872 257 880 257 L 1007 257 Q 1015 257 1015 249 L 1015 154" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
-          <path data-edge-from="pipeline" data-edge-to="publishers" data-edge-label="fetch HTML" data-edge-key="10" data-edge-id="pipeline-to-publishers" data-composition-points="872,360;872,257;1015,257;1015,154" data-composition-crossover="halo" data-composition-independent="true" d="M 872 360 L 872 265 Q 872 257 880 257 L 1007 257 Q 1015 257 1015 249 L 1015 154" class="a-default" data-animate="edge" style="--step: 10;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+          <path data-graph-role="automatic-crossover-underlay" d="M 946 360 L 946 154" fill="none" stroke="var(--mask)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>
+          <path data-edge-from="pipeline" data-edge-to="publishers" data-edge-label="fetch HTML" data-edge-key="10" data-edge-id="pipeline-to-publishers" data-composition-points="946,360;946,154" data-composition-crossover="halo" data-composition-independent="true" d="M 946 360 L 946 154" class="a-default" data-animate="edge" style="--step: 10;" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         </g>
 
         <!-- Components -->
@@ -719,8 +723,8 @@ svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-fram
         <text x="110" y="416" class="t-external" font-size="7" text-anchor="middle">no account</text>
         </g>
 
-        <g id="node-editor" data-node-id="editor" data-node-label="Editor" tabindex="0" role="button" aria-label="Focus Editor, Private admin desk, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="Private admin desk" data-node-tag="human gate" data-node-context="Architecture component">
-          <title>Editor · Private admin desk · Architecture component · human gate</title>
+        <g id="node-editor" data-node-id="editor" data-node-label="Editor" tabindex="0" role="button" aria-label="Focus Editor, Private admin desk, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="Private admin desk" data-node-tag="manual option" data-node-context="Architecture component">
+          <title>Editor · Private admin desk · Architecture component · manual option</title>
           <rect x="40" y="540" width="140" height="64" rx="8" class="c-mask"/>
           <rect x="40" y="540" width="140" height="64" rx="8" class="c-external" data-animate="node" style="--step: 2; --flow-node-name: archify-relay-node-1;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="person" class="semantic-sigil s-external" transform="translate(46 546) scale(0.6875)">
@@ -728,7 +732,7 @@ svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-fram
           </g>
           <text data-node-label="" x="110" y="570" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Editor</text>
         <text x="110" y="586" class="t-muted" font-size="9" text-anchor="middle">Private admin desk</text>
-        <text x="110" y="596" class="t-external" font-size="7" text-anchor="middle">human gate</text>
+        <text x="110" y="596" class="t-external" font-size="7" text-anchor="middle">manual option</text>
         </g>
 
         <g id="node-assets" data-node-id="assets" data-node-label="Static assets" tabindex="0" role="button" aria-label="Focus Static assets, CSS · client JS · fonts, Cloudflare account · free plan" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="CSS · client JS · fonts" data-node-tag="ASSETS" data-node-context="Cloudflare account · free plan">
@@ -781,55 +785,55 @@ svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-fram
         <text x="620" y="428" class="t-database" font-size="7" text-anchor="middle">single source of truth</text>
         </g>
 
-        <g id="node-pipeline" data-node-id="pipeline" data-node-label="understory-pipeline" tabindex="0" role="button" aria-label="Focus understory-pipeline, queue consumer · cron worker, Cloudflare account · free plan" aria-pressed="false" data-node-kind="backend" data-node-sublabel="queue consumer · cron worker" data-node-tag="Worker" data-node-context="Cloudflare account · free plan">
-          <title>understory-pipeline · queue consumer · cron worker · Cloudflare account · free plan · Worker</title>
-          <rect x="770" y="360" width="190" height="76" rx="8" class="c-mask"/>
-          <rect x="770" y="360" width="190" height="76" rx="8" class="c-backend" data-animate="node" style="--step: 5; --flow-node-name: archify-relay-node-2;" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(776 366) scale(0.6875)">
+        <g id="node-pipeline" data-node-id="pipeline" data-node-label="understory-pipeline" tabindex="0" role="button" aria-label="Focus understory-pipeline, validate · publish new, Cloudflare account · free plan" aria-pressed="false" data-node-kind="backend" data-node-sublabel="validate · publish new" data-node-tag="Worker" data-node-context="Cloudflare account · free plan">
+          <title>understory-pipeline · validate · publish new · Cloudflare account · free plan · Worker</title>
+          <rect x="810" y="360" width="190" height="76" rx="8" class="c-mask"/>
+          <rect x="810" y="360" width="190" height="76" rx="8" class="c-backend" data-animate="node" style="--step: 5; --flow-node-name: archify-relay-node-2;" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(816 366) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="865" y="396" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">understory-pipeline</text>
-        <text x="865" y="412" class="t-muted" font-size="9" text-anchor="middle">queue consumer · cron worker</text>
-        <text x="865" y="428" class="t-backend" font-size="7" text-anchor="middle">Worker</text>
+          <text data-node-label="" x="905" y="396" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">understory-pipeline</text>
+        <text x="905" y="412" class="t-muted" font-size="9" text-anchor="middle">validate · publish new</text>
+        <text x="905" y="428" class="t-backend" font-size="7" text-anchor="middle">Worker</text>
         </g>
 
         <g id="node-ai" data-node-id="ai" data-node-label="Workers AI" tabindex="0" role="button" aria-label="Focus Workers AI, Qwen3 30B A3B, Cloudflare account · free plan" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="Qwen3 30B A3B" data-node-tag="AI binding" data-node-context="Cloudflare account · free plan">
           <title>Workers AI · Qwen3 30B A3B · Cloudflare account · free plan · AI binding</title>
-          <rect x="1040" y="360" width="160" height="64" rx="8" class="c-mask"/>
-          <rect x="1040" y="360" width="160" height="64" rx="8" class="c-cloud" data-animate="node" style="--step: 7; --flow-node-name: archify-relay-node-7;" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(1046 366) scale(0.6875)">
+          <rect x="1080" y="360" width="160" height="64" rx="8" class="c-mask"/>
+          <rect x="1080" y="360" width="160" height="64" rx="8" class="c-cloud" data-animate="node" style="--step: 7; --flow-node-name: archify-relay-node-7;" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(1086 366) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-node-label="" x="1120" y="390" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Workers AI</text>
-        <text x="1120" y="406" class="t-muted" font-size="9" text-anchor="middle">Qwen3 30B A3B</text>
-        <text x="1120" y="416" class="t-cloud" font-size="7" text-anchor="middle">AI binding</text>
+          <text data-node-label="" x="1160" y="390" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Workers AI</text>
+        <text x="1160" y="406" class="t-muted" font-size="9" text-anchor="middle">Qwen3 30B A3B</text>
+        <text x="1160" y="416" class="t-cloud" font-size="7" text-anchor="middle">AI binding</text>
         </g>
 
         <g id="node-queue" data-node-id="queue" data-node-label="understory-jobs" tabindex="0" role="button" aria-label="Focus understory-jobs, consumer: pipeline, Cloudflare account · free plan" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="consumer: pipeline" data-node-tag="max 5 · retry 3" data-node-context="Cloudflare account · free plan">
           <title>understory-jobs · consumer: pipeline · Cloudflare account · free plan · max 5 · retry 3</title>
-          <rect x="770" y="560" width="170" height="64" rx="8" class="c-mask"/>
-          <rect x="770" y="560" width="170" height="64" rx="8" class="c-messagebus" data-animate="node" style="--step: 8; --flow-node-name: archify-relay-node-8;" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(776 566) scale(0.6875)">
+          <rect x="810" y="560" width="170" height="64" rx="8" class="c-mask"/>
+          <rect x="810" y="560" width="170" height="64" rx="8" class="c-messagebus" data-animate="node" style="--step: 8; --flow-node-name: archify-relay-node-8;" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(816 566) scale(0.6875)">
             <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
             <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
             <circle cx="10.5" cy="8" r="1" class="sigil-fill"/>
             <circle cx="7" cy="11.5" r="1" class="sigil-fill"/>
           </g>
-          <text data-node-label="" x="855" y="590" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">understory-jobs</text>
-        <text x="855" y="606" class="t-muted" font-size="9" text-anchor="middle">consumer: pipeline</text>
-        <text x="855" y="616" class="t-messagebus" font-size="7" text-anchor="middle">max 5 · retry 3</text>
+          <text data-node-label="" x="895" y="590" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">understory-jobs</text>
+        <text x="895" y="606" class="t-muted" font-size="9" text-anchor="middle">consumer: pipeline</text>
+        <text x="895" y="616" class="t-messagebus" font-size="7" text-anchor="middle">max 5 · retry 3</text>
         </g>
 
         <g id="node-cron" data-node-id="cron" data-node-label="Cron trigger" tabindex="0" role="button" aria-label="Focus Cron trigger, every 15 min UTC, Cloudflare account · free plan" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="every 15 min UTC" data-node-tag="scheduled()" data-node-context="Cloudflare account · free plan">
           <title>Cron trigger · every 15 min UTC · Cloudflare account · free plan · scheduled()</title>
-          <rect x="1030" y="560" width="160" height="64" rx="8" class="c-mask"/>
-          <rect x="1030" y="560" width="160" height="64" rx="8" class="c-cloud" data-animate="node" style="--step: 8; --flow-node-name: archify-relay-node-3;" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="clock" class="semantic-sigil s-cloud" transform="translate(1036 566) scale(0.6875)">
+          <rect x="1070" y="560" width="160" height="64" rx="8" class="c-mask"/>
+          <rect x="1070" y="560" width="160" height="64" rx="8" class="c-cloud" data-animate="node" style="--step: 8; --flow-node-name: archify-relay-node-3;" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="clock" class="semantic-sigil s-cloud" transform="translate(1076 566) scale(0.6875)">
             <circle cx="8" cy="8" r="6"/><path d="M8 4v4l3 2"/>
           </g>
-          <text data-node-label="" x="1110" y="590" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Cron trigger</text>
-        <text x="1110" y="606" class="t-muted" font-size="9" text-anchor="middle">every 15 min UTC</text>
-        <text x="1110" y="616" class="t-cloud" font-size="7" text-anchor="middle">scheduled()</text>
+          <text data-node-label="" x="1150" y="590" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Cron trigger</text>
+        <text x="1150" y="606" class="t-muted" font-size="9" text-anchor="middle">every 15 min UTC</text>
+        <text x="1150" y="616" class="t-cloud" font-size="7" text-anchor="middle">scheduled()</text>
         </g>
 
         <g id="node-engblogs" data-node-id="engblogs" data-node-label="Engineering Blogs" tabindex="0" role="button" aria-label="Focus Engineering Blogs, engineeringblogs.xyz, Architecture component" aria-pressed="false" data-node-kind="external" data-node-sublabel="engineeringblogs.xyz" data-node-tag="HTML listing" data-node-context="Architecture component">
@@ -879,29 +883,29 @@ svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-fram
           <rect x="483" y="378" width="34" height="14" rx="3" class="c-mask"/>
           <text x="500" y="388" class="t-edge-default" font-size="8" text-anchor="middle">reads</text>
         </g>
-        <g data-edge-from="pipeline" data-edge-to="d1" data-edge-label="drafts" data-edge-key="5" data-edge-id="pipeline-to-d1">
-          <rect x="720.6" y="378" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="740" y="388" class="t-edge-default" font-size="8" text-anchor="middle">drafts</text>
+        <g data-edge-from="pipeline" data-edge-to="d1" data-edge-label="valid → publish" data-edge-key="5" data-edge-id="pipeline-to-d1">
+          <rect x="719" y="378" width="82" height="14" rx="3" class="c-mask"/>
+          <text x="760" y="388" class="t-edge-default" font-size="8" text-anchor="middle">valid → publish</text>
         </g>
         <g data-edge-from="pipeline" data-edge-to="ai" data-edge-label="generate" data-edge-key="6" data-edge-id="pipeline-to-ai">
-          <rect x="975.8" y="378" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="1000" y="388" class="t-edge-default" font-size="8" text-anchor="middle">generate</text>
+          <rect x="1015.8" y="378" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="1040" y="388" class="t-edge-default" font-size="8" text-anchor="middle">generate</text>
         </g>
         <g data-edge-from="pipeline" data-edge-to="queue" data-edge-label="async jobs" data-edge-key="7" data-edge-id="pipeline-to-queue">
-          <rect x="801" y="491" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="830" y="501" class="t-edge-dashed" font-size="8" text-anchor="middle">async jobs</text>
+          <rect x="841" y="491" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="870" y="501" class="t-edge-dashed" font-size="8" text-anchor="middle">async jobs</text>
         </g>
         <g data-edge-from="cron" data-edge-to="queue" data-edge-label="enqueue" data-edge-key="8" data-edge-id="cron-to-queue">
-          <rect x="963.2" y="572" width="43.6" height="14" rx="3" class="c-mask"/>
-          <text x="985" y="582" class="t-edge-dashed" font-size="8" text-anchor="middle">enqueue</text>
+          <rect x="1003.2" y="572" width="43.6" height="14" rx="3" class="c-mask"/>
+          <text x="1025" y="582" class="t-edge-dashed" font-size="8" text-anchor="middle">enqueue</text>
         </g>
         <g data-edge-from="pipeline" data-edge-to="engblogs" data-edge-label="fetch listing" data-edge-key="9" data-edge-id="pipeline-to-engblogs">
-          <rect x="779.5999999999999" y="250" width="72.4" height="14" rx="3" class="c-mask"/>
-          <text x="815.8" y="260" class="t-edge-default" font-size="8" text-anchor="middle">fetch listing</text>
+          <rect x="827.8" y="340" width="72.4" height="14" rx="3" class="c-mask"/>
+          <text x="864" y="350" class="t-edge-default" font-size="8" text-anchor="middle">fetch listing</text>
         </g>
         <g data-edge-from="pipeline" data-edge-to="publishers" data-edge-label="fetch HTML" data-edge-key="10" data-edge-id="pipeline-to-publishers">
-          <rect x="914.5" y="237" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="943.5" y="247" class="t-edge-default" font-size="8" text-anchor="middle">fetch HTML</text>
+          <rect x="917" y="340" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="946" y="350" class="t-edge-default" font-size="8" text-anchor="middle">fetch HTML</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->

@@ -29,6 +29,85 @@ function existingRevision(status: string) {
 }
 
 describe("pipeline consistency", () => {
+  it("auto-publishes a newly validated generation once, without extra model calls", async () => {
+    env.AUTO_PUBLISH = "true";
+    await generateJob();
+    expect((await processJob(env, "job")).ok).toBe(true);
+    const revision = store.sqlite.prepare("SELECT id, status, provenance_json FROM explanation_revisions").get()!;
+    expect(revision.status).toBe("published");
+    expect(store.sqlite.prepare("SELECT status, published_revision_id FROM articles").get()).toMatchObject({ status: "published", published_revision_id: revision.id });
+    expect(JSON.parse(revision.provenance_json as string).reviewedBy).toBe("Understory automated validation");
+    expect(store.sqlite.prepare("SELECT reviewer, decision FROM reviews").get()).toMatchObject({ reviewer: "Understory automated validation", decision: "approved" });
+    const version = store.sqlite.prepare("SELECT value FROM meta WHERE key = 'publication_version'").get()?.value;
+    expect(version).toBe("1");
+    await processJob(env, "job");
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(1);
+    expect(store.sqlite.prepare("SELECT value FROM meta WHERE key = 'publication_version'").get()?.value).toBe(version);
+  });
+  it("leaves existing drafts unpublished when automatic publication is enabled", async () => {
+    env.AUTO_PUBLISH = "true";
+    existingRevision("draft");
+    await generateJob();
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("review");
+    expect(store.sqlite.prepare("SELECT status FROM explanation_revisions").get()?.status).toBe("draft");
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(0);
+    expect(mocks.generate).not.toHaveBeenCalled();
+  });
+  it("never publishes a generation rejected by validation", async () => {
+    env.AUTO_PUBLISH = "true";
+    await generateJob();
+    mocks.generate.mockResolvedValue({ ok: false, explanation: null, issues: [{ path: "sources", message: "invalid source" }], rawText: "{}", usage: null });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status, published_revision_id FROM articles").get()).toMatchObject({ status: "failed", published_revision_id: null });
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM explanation_revisions").get()?.n).toBe(0);
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(0);
+  });
+  it("cannot auto-publish after losing its lease during the publication transaction", async () => {
+    env.AUTO_PUBLISH = "true";
+    await generateJob();
+    mocks.generate.mockImplementationOnce(async () => {
+      store.beforeBatch(() => { store.sqlite.exec("UPDATE jobs SET lease_token = 'replacement'"); });
+      return { ok: true, explanation, issues: [], rawText: "{}", usage: null };
+    });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT published_revision_id FROM articles").get()?.published_revision_id).toBeNull();
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM explanation_revisions").get()?.n).toBe(0);
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(0);
+  });
+  it("rolls back the generated revision when automatic publication fails", async () => {
+    env.AUTO_PUBLISH = "true";
+    await generateJob();
+    store.failOn("INSERT INTO reviews");
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM explanation_revisions").get()?.n).toBe(0);
+    expect(store.sqlite.prepare("SELECT published_revision_id FROM articles").get()?.published_revision_id).toBeNull();
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(0);
+  });
+  it("does not overwrite an article published by an editor while generation was running", async () => {
+    env.AUTO_PUBLISH = "true";
+    await generateJob();
+    mocks.generate.mockImplementationOnce(async () => {
+      store.beforeBatch(() => {
+        existingRevision("published");
+        store.sqlite.exec("UPDATE articles SET status = 'published', published_revision_id = 'revision'");
+      });
+      return { ok: true, explanation, issues: [], rawText: "{}", usage: null };
+    });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT published_revision_id FROM articles").get()?.published_revision_id).toBe("revision");
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM explanation_revisions").get()?.n).toBe(1);
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(0);
+  });
+  it("keeps new valid generations in review when automatic publication is disabled", async () => {
+    env.AUTO_PUBLISH = "false";
+    await generateJob();
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe("review");
+    expect(store.sqlite.prepare("SELECT status FROM explanation_revisions").get()?.status).toBe("draft");
+    expect(store.sqlite.prepare("SELECT COUNT(*) AS n FROM reviews").get()?.n).toBe(0);
+  });
   it("does not turn a rejected revision into a phantom review on retry", async () => {
     existingRevision("rejected"); await generateJob();
     await processJob(env, "job");

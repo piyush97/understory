@@ -31,7 +31,5 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run check
       - run: npm audit
-      - name: Bundle web Worker (no deployment)
-        run: npx wrangler deploy --dry-run --config wrangler.web.jsonc --outdir "$RUNNER_TEMP/understory-web"
-      - name: Bundle pipeline Worker (no deployment)
-        run: npx wrangler deploy --dry-run --config wrangler.pipeline.jsonc --outdir "$RUNNER_TEMP/understory-pipeline"
+      - name: Build both Workers (no deployment)
+        run: npm run build

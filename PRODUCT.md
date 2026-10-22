@@ -16,7 +16,7 @@ Software engineers, primarily staff and senior engineers, who scan engineering b
 
 ## Product Purpose
 
-Understory turns the latest posts from engineeringblogs.xyz into reviewed explainers. Each explainer gives the reader a useful contextual headline, a TL;DR, prerequisite background, a detailed explanation of how the work functions, a diagram, an ELI5 mental model, trade-offs, and sources. Success means a reader can explain the post's mechanism to a colleague without first reading three other articles.
+Understory turns the latest posts from engineeringblogs.xyz into validated explainers. Each explainer gives the reader a useful contextual headline, a TL;DR, prerequisite background, a detailed explanation of how the work functions, a diagram, an ELI5 mental model, trade-offs, and sources. Success means a reader can explain the post's mechanism to a colleague without first reading three other articles.
 
 ## Positioning
 
@@ -24,7 +24,7 @@ A reading layer, not a summary bot. Every explanation is grounded in extracted s
 
 ## Operating Context
 
-Articles are discovered from engineeringblogs.xyz. Original publishers and authors keep attribution and are linked prominently. Generation is asynchronous and precomputed; readers never wait on inference. A private editorial surface reviews drafts before publication. The public product is read-only in v1.
+Articles are discovered from engineeringblogs.xyz. Original publishers and authors keep attribution and are linked prominently. Generation is asynchronous and precomputed; readers never wait on inference. New generations can publish automatically after validation. A private editorial surface remains available for existing drafts and manual-review mode. Automated checks are not human fact-checking. The public product is read-only in v1.
 
 ## Capabilities and Constraints
 
@@ -33,7 +33,7 @@ Articles are discovered from engineeringblogs.xyz. Original publishers and autho
 - No arbitrary URL ingestion and no unrestricted URL proxy.
 - Runs on Cloudflare free tier: one web Worker, one pipeline Worker, D1, Queues, Workers AI, Cron Triggers.
 - Daily generation is bounded and reserved. Exhausting the AI allowance pauses new generation; it must not break reading.
-- Human review is required before a draft becomes public.
+- With `AUTO_PUBLISH="true"`, only newly generated revisions that pass validation publish automatically. Existing drafts require human approval. Set it to `false` to require human review for all new drafts.
 - Published revisions are immutable and independently addressable.
 - Free-plan storage and queue retention govern retention policy.
 

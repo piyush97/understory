@@ -33,7 +33,7 @@ import {
   setMeta,
   upsertSource,
 } from "../infrastructure/db";
-import { dailyNeuronBudget, type Bindings, type QueueMessage } from "../shared/env";
+import { bool, dailyNeuronBudget, type Bindings, type QueueMessage } from "../shared/env";
 import { fetchPublicText } from "../shared/fetch";
 import { parseDiscoveryHtml } from "./discovery";
 import { extractArticle, fetchArticlePage, toSnapshot } from "./extract";
@@ -360,6 +360,8 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   }
 
   const generatedAt = new Date().toISOString();
+  const autoPublish = bool(env.AUTO_PUBLISH);
+  const reviewer = "Understory automated validation";
   const provenance = {
     origin: "workers-ai",
     modelId: model,
@@ -371,7 +373,10 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
     sourceHash: null,
     usage: generation.usage,
     materialLinks: links.map((link) => link.url),
-    editorial: "Draft only. Publication requires a human review.",
+    ...(autoPublish ? { reviewedBy: reviewer } : {}),
+    editorial: autoPublish
+      ? "Automatically published after schema, citation, diagram, and source checks; not human-reviewed."
+      : "Draft only. Publication requires a human review.",
   };
 
   const inserted = await insertRevision(env.DB, {
@@ -383,17 +388,17 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
     modelId: model,
     promptVersion: PROMPT_VERSION,
     schemaVersion: SCHEMA_VERSION,
-  }, job);
+  }, job, autoPublish ? { reviewer } : undefined);
 
-  if (inserted) await setArticleStatus(env.DB, article.id, "review", null, job);
-  else {
+  if (inserted && !autoPublish) await setArticleStatus(env.DB, article.id, "review", null, job);
+  else if (!inserted) {
     const revision = await findRevisionKey(env.DB, { articleId: article.id, snapshotId, modelId: model, promptVersion: PROMPT_VERSION, schemaVersion: SCHEMA_VERSION });
     if (revision?.status === "draft") await setArticleStatus(env.DB, article.id, "review", null, job);
   }
   return {
     ok: true,
     detail: inserted
-      ? `Draft ready for review: ${generation.explanation.contextHeadline}`
+      ? `${autoPublish ? "Automatically published" : "Draft ready for review"}: ${generation.explanation.contextHeadline}`
       : "Draft already existed; marked job complete.",
     counts: { attempts: attempt },
   };

@@ -1,8 +1,8 @@
 # Understory
 
-Engineering blogs, explained. Understory watches [engineeringblogs.xyz](https://engineeringblogs.xyz/), turns selected posts into reviewed explainers, and publishes a dense reading index with context, diagrams, an ELI5, trade-offs, and sources.
+Engineering blogs, explained. Understory watches [engineeringblogs.xyz](https://engineeringblogs.xyz/), turns selected posts into validated explainers, and publishes a dense reading index with context, diagrams, an ELI5, trade-offs, and sources.
 
-The public side is read-only and fully server-rendered. Explanations are generated asynchronously, validated against a schema, and held in an auth-gated editorial queue until a person approves them.
+The public side is read-only and fully server-rendered. Explanations are generated asynchronously and validated. With `AUTO_PUBLISH="true"`, new valid generations publish automatically; existing drafts still require manual approval. Automated checks are not human fact-checking.
 
 ## Stack
 
@@ -25,7 +25,7 @@ Two Workers share one D1 database:
 
 [![Understory system architecture](docs/architecture.png)](docs/architecture.html)
 
-Two Workers share one Cloudflare account and one D1 database. `understory-web` renders the public reading app and the auth-gated editorial desk. `understory-pipeline` consumes discovery, extraction, and generation jobs, fetches [engineeringblogs.xyz](https://engineeringblogs.xyz/) and publisher pages, calls Workers AI, and writes draft revisions to D1. A person must approve a draft before it can appear in the public index.
+Two Workers share one Cloudflare account and one D1 database. `understory-web` renders the public reading app and the auth-gated editorial desk. `understory-pipeline` consumes discovery, extraction, and generation jobs, fetches [engineeringblogs.xyz](https://engineeringblogs.xyz/) and publisher pages, calls Workers AI, and writes revisions to D1. New valid generations publish automatically when `AUTO_PUBLISH="true"`; existing drafts stay in the editorial queue.
 
 The image above is a static export. The [interactive diagram](docs/architecture.html) supports route focus, lens, and source links; download it and open it in a browser because GitHub displays HTML files as source, not as a rendered page.
 
@@ -102,7 +102,7 @@ npx playwright install chromium
 1. The cron trigger enqueues a discovery message every 15 minutes. Discovery fetches the public listing, parses recent entries, creates source rows, inserts new articles, and queues extract jobs.
 2. An extract job fetches one article, pulls readable blocks with `HTMLRewriter`, records a content-hashed snapshot, and queues a generate job.
 3. A generate job reserves an estimated slice of the daily neuron budget, asks Workers AI for strict JSON, validates it structurally and semantically, and writes a draft revision.
-4. A person reviews the draft against the snapshot. Approval writes an immutable revision, updates the article, and increments the publication version. Rejection keeps the revision for the record.
+4. With `AUTO_PUBLISH="true"` (enabled in the production pipeline config), a newly generated valid revision publishes in the same transaction that creates it, with an automated-validation audit record. Existing drafts are never auto-approved. Set `AUTO_PUBLISH="false"` and redeploy the pipeline to hold new drafts for manual review. Publication updates the article and increments the publication version; failed validation stays unpublished.
 5. Public pages read only published revisions. A reader request never calls a model.
 
 The daily budget defaults to 8,000 neurons, with roughly 500 neurons reserved per attempt. The pipeline stops before exceeding the budget and defers jobs to the next UTC day. Set `DAILY_NEURON_BUDGET="0"` to pause generation entirely without breaking reading.
@@ -162,11 +162,18 @@ npm run deploy:pipeline
 npm run deploy:web
 ```
 
+For Cloudflare Workers Builds, use `npm run build` (or `bun run build`) as the build
+command. It typechecks and bundles both Workers without deploying. For the web
+Worker, set the deploy command to `npm run deploy:web` and the preview/non-production
+command to `npx wrangler versions upload --config wrangler.jsonc`.
+For a separate pipeline build integration, use `npm run deploy:pipeline` as its
+production deploy command.
+
 Install a strong, randomly generated editorial secret on both deployed Workers
 using Wrangler's interactive secret prompt (never commit or paste it into logs):
 
 ```bash
-npx wrangler secret put ADMIN_TOKEN --config wrangler.web.jsonc
+npx wrangler secret put ADMIN_TOKEN --config wrangler.jsonc
 npx wrangler secret put ADMIN_TOKEN --config wrangler.pipeline.jsonc
 ```
 
@@ -177,7 +184,7 @@ in UTC (the next quarter-hour). To remove automatic discovery, remove its
 generation, not discovery.
 
 Optional hardening: put Cloudflare Access in front of `/admin`, set the
-`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` values in `wrangler.web.jsonc` (the
+`ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` values in `wrangler.jsonc` (the
 `ACCESS_AUD` value is the application audience tag shown in the Access
 application overview), then set `REQUIRE_ACCESS_JWT="true"` on the web Worker.
 The Worker requires both the editorial token and a valid signed Access
