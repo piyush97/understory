@@ -641,6 +641,7 @@ export async function rejectRevision(
       AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)
       AND NOT EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')`)
       .bind(now, revisionId, reviewId),
+    ...requeueDuplicateStatements(db, null, now, reviewId),
   ]);
   return (results[0]?.meta.changes ?? 0) > 0;
 }
@@ -820,6 +821,43 @@ export async function upsertSource(
     )
     .bind(input.id, input.name, input.siteUrl, input.host, input.feedUrl ?? null)
     .run();
+}
+
+export async function requeueDuplicates(
+  db: D1Database,
+  survivorId: string,
+): Promise<number> {
+  const results = await db.batch(requeueDuplicateStatements(db, survivorId, new Date().toISOString()));
+  return results[1]?.meta.changes ?? 0;
+}
+
+function requeueDuplicateStatements(
+  db: D1Database,
+  survivorId: string | null,
+  now: string,
+  reviewId: string | null = null,
+): D1PreparedStatement[] {
+  const where = `articles.status = 'skipped' AND articles.duplicate_of = COALESCE(?, (
+    SELECT r.article_id FROM reviews v JOIN explanation_revisions r ON r.id = v.revision_id
+    WHERE v.id = ? AND v.decision = 'rejected'
+  )) AND EXISTS (SELECT 1 FROM articles survivor
+    WHERE survivor.id = articles.duplicate_of AND survivor.status IN ('failed', 'skipped')
+      AND survivor.published_revision_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM explanation_revisions
+        WHERE article_id = survivor.id AND status IN ('draft', 'published')))`;
+  // Both statements select the same rows inside one transaction; reset jobs before clearing duplicate_of.
+  return [
+    db.prepare(`INSERT INTO jobs (id, kind, article_id, payload_json, idempotency_key, next_run_at, state, attempts)
+      SELECT 'job_extract_' || id, 'extract', id, '{}', 'extract:' || id, ?, 'pending', 0
+      FROM articles WHERE ${where}
+      ON CONFLICT (idempotency_key) DO UPDATE SET
+        state = 'pending', attempts = 0, lease_token = NULL, lease_expires_at = NULL,
+        next_run_at = excluded.next_run_at, last_error = NULL, updated_at = excluded.next_run_at`)
+      .bind(now, survivorId, reviewId),
+    db.prepare(`UPDATE articles SET status = 'discovered', duplicate_of = NULL,
+      selection_reason = NULL, last_error = NULL, updated_at = ? WHERE ${where}`)
+      .bind(now, survivorId, reviewId),
+  ];
 }
 
 export type ArticleSelection = {
