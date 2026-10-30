@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, insertArticle, insertRevision, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, insertArticle, insertRevision, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
 import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
@@ -118,6 +118,98 @@ describe("selection persistence", () => {
       "2026-10-15T00:00:00.000Z",
     );
     expect(rows.map((row) => row.id)).toEqual(["recent"]);
+  });
+});
+
+describe("feed lead", () => {
+  it("leads with the highest-scoring recent published article", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-29T12:00:00.000Z"));
+    const db = setup();
+    seedPublished(db, { id: "new-low", publishedAt: "2026-10-29T10:00:00.000Z", selectionScore: 20 });
+    seedPublished(db, { id: "old-high", publishedAt: "2026-10-20T10:00:00.000Z", selectionScore: 80 });
+    seedPublished(db, { id: "ancient", publishedAt: "2026-09-01T10:00:00.000Z", selectionScore: 100 });
+
+    expect((await getFeedLead(db.db))?.id).toBe("old-high");
+  });
+
+  it("falls back to the newest published article when the window is empty", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-29T12:00:00.000Z"));
+    const db = setup();
+    seedPublished(db, { id: "older", publishedAt: "2026-09-01T10:00:00.000Z", selectionScore: 100 });
+    seedPublished(db, { id: "newer", publishedAt: "2026-09-02T10:00:00.000Z", selectionScore: 0 });
+
+    expect((await getFeedLead(db.db))?.id).toBe("newer");
+  });
+
+  it("breaks lead score ties by newest", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-29T12:00:00.000Z"));
+    const db = setup();
+    seedPublished(db, { id: "tie-old", publishedAt: "2026-10-27T10:00:00.000Z", selectionScore: 60 });
+    seedPublished(db, { id: "tie-new", publishedAt: "2026-10-28T10:00:00.000Z", selectionScore: 60 });
+
+    expect((await getFeedLead(db.db))?.id).toBe("tie-new");
+  });
+
+  it.each([
+    ["recent", "2026-10-28T10:00:00.000Z"],
+    ["fallback", "2026-09-02T10:00:00.000Z"],
+  ])("breaks %s lead timestamp ties by descending id", async (_path, publishedAt) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-29T12:00:00.000Z"));
+    const db = setup();
+    seedPublished(db, { id: "tie-a", publishedAt, selectionScore: 60 });
+    seedPublished(db, { id: "tie-z", publishedAt, selectionScore: 60 });
+
+    expect((await getFeedLead(db.db))?.id).toBe("tie-z");
+  });
+
+  it("excludes duplicates from the recent lead", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-29T12:00:00.000Z"));
+    const db = setup();
+    seedPublished(db, { id: "original", publishedAt: "2026-10-28T10:00:00.000Z", selectionScore: 20 });
+    seedPublished(db, { id: "duplicate", publishedAt: "2026-10-28T11:00:00.000Z", selectionScore: 100, duplicateOf: "original" });
+
+    expect((await getFeedLead(db.db))?.id).toBe("original");
+  });
+
+  it("falls back to the latest published duplicate regardless of score", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-29T12:00:00.000Z"));
+    const db = setup();
+    seedPublished(db, { id: "original", publishedAt: "2026-09-02T10:00:00.000Z", selectionScore: 100 });
+    seedPublished(db, { id: "duplicate", publishedAt: "2026-09-02T11:00:00.000Z", selectionScore: 0, duplicateOf: "original" });
+
+    expect((await getFeedLead(db.db))?.id).toBe("duplicate");
+  });
+
+  it("includes the exact 14-day boundary but excludes older high scores", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-29T12:00:00.000Z"));
+    const db = setup();
+    seedPublished(db, { id: "boundary", publishedAt: "2026-10-15T12:00:00.000Z", selectionScore: 80 });
+    seedPublished(db, { id: "outside", publishedAt: "2026-10-15T11:59:59.999Z", selectionScore: 100 });
+    seedPublished(db, { id: "recent", publishedAt: "2026-10-29T10:00:00.000Z", selectionScore: 20 });
+
+    expect((await getFeedLead(db.db))?.id).toBe("boundary");
+  });
+
+  it("returns null when no articles are published", async () => {
+    const db = setup();
+
+    expect(await getFeedLead(db.db)).toBeNull();
+  });
+
+  it("falls back to a published duplicate when no recent nonduplicate exists", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-29T12:00:00.000Z"));
+    const db = setup();
+    seedPublished(db, { id: "duplicate", publishedAt: "2026-10-28T10:00:00.000Z", selectionScore: 100, duplicateOf: "article" });
+
+    expect((await getFeedLead(db.db))?.id).toBe("duplicate");
   });
 });
 

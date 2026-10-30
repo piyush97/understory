@@ -11,6 +11,7 @@ import type {
 import type { FeedCursor } from "../domain/pagination";
 import { validateExplanation, type Explanation } from "../domain/explanation";
 import { estimateReadingMinutes } from "../domain/source";
+import { LEAD_WINDOW_DAYS } from "../domain/selection";
 
 type ArticleRow = {
   id: string;
@@ -184,20 +185,34 @@ export async function listPendingArticles(
 }
 
 export async function getFeedLead(db: D1Database): Promise<PublishedArticle | null> {
-  const result = await db
+  const windowStart = new Date(Date.now() - LEAD_WINDOW_DAYS * 86_400_000).toISOString();
+  const select = `SELECT a.*, s.name AS source_name, s.site_url AS source_site_url, s.host AS source_host,
+                        t.label AS topic_label,
+                        r.content_json AS revision_content, r.provenance_json AS revision_provenance
+                 FROM articles a
+                 JOIN sources s ON s.id = a.source_id
+                 LEFT JOIN topics t ON t.id = a.topic_id
+                 JOIN explanation_revisions r ON r.id = a.published_revision_id`;
+  let result = await db
     .prepare(
-      `SELECT a.*, s.name AS source_name, s.site_url AS source_site_url, s.host AS source_host,
-              t.label AS topic_label,
-              r.content_json AS revision_content, r.provenance_json AS revision_provenance
-       FROM articles a
-       JOIN sources s ON s.id = a.source_id
-       LEFT JOIN topics t ON t.id = a.topic_id
-       JOIN explanation_revisions r ON r.id = a.published_revision_id
-       WHERE a.status = 'published'
-       ORDER BY a.published_at DESC, a.id DESC
+      `${select}
+       WHERE a.status = 'published' AND a.duplicate_of IS NULL AND a.published_at >= ?
+       ORDER BY a.selection_score DESC, a.published_at DESC, a.id DESC
        LIMIT 1`,
     )
+    .bind(windowStart)
     .first<ArticleSourceRow & { revision_content: string; revision_provenance: string }>();
+
+  if (!result) {
+    result = await db
+      .prepare(
+        `${select}
+         WHERE a.status = 'published'
+         ORDER BY a.published_at DESC, a.id DESC
+         LIMIT 1`,
+      )
+      .first<ArticleSourceRow & { revision_content: string; revision_provenance: string }>();
+  }
 
   if (!result) return null;
   return {
