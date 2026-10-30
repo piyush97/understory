@@ -1,11 +1,16 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { FIXTURE_ARTICLES } from "../../src/content/fixtures";
 
 export function sqliteDb() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON");
-  sqlite.exec(readFileSync(new URL("../../migrations/0001_init.sql", import.meta.url), "utf8"));
+  const migrations = readdirSync(new URL("../../migrations/", import.meta.url))
+    .filter((name) => name.endsWith(".sql"))
+    .sort();
+  for (const name of migrations) {
+    sqlite.exec(readFileSync(new URL(`../../migrations/${name}`, import.meta.url), "utf8"));
+  }
   let beforeBatch: (() => Promise<void> | void) | undefined;
   let failStatement: string | undefined;
   const executions = new WeakMap<D1PreparedStatement, () => unknown>();

@@ -160,3 +160,13 @@ describe("editorial transitions", () => {
     expect(db.sqlite.prepare("SELECT status FROM articles").get()?.status).toBe(published ? "published" : "failed");
   });
 });
+
+describe("schema", () => {
+  it("loads every migration and adds selection columns", () => {
+    const db = setup();
+    const columns = db.sqlite.prepare("PRAGMA table_info(articles)").all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["selection_score", "selection_reason", "duplicate_of"]),
+    );
+  });
+});

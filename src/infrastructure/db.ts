@@ -29,6 +29,9 @@ type ArticleRow = {
   reading_minutes: number | null;
   published_revision_id: string | null;
   last_error: string | null;
+  selection_score: number;
+  selection_reason: string | null;
+  duplicate_of: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -92,6 +95,9 @@ function mapArticle(row: ArticleRow): Article {
     readingMinutes: row.reading_minutes,
     publishedRevisionId: row.published_revision_id,
     lastError: row.last_error,
+    selectionScore: row.selection_score,
+    selectionReason: row.selection_reason,
+    duplicateOf: row.duplicate_of,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
