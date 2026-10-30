@@ -445,6 +445,49 @@ export async function listReviewQueue(
   }));
 }
 
+export type RecentSourceArticle = {
+  id: string;
+  originalTitle: string;
+  slug: string;
+  publishedAt: string;
+  status: string;
+};
+
+export async function listRecentSourceArticles(
+  db: D1Database,
+  sourceId: string,
+  articleId: string,
+  since: string,
+): Promise<RecentSourceArticle[]> {
+  const result = await db
+    .prepare(
+      `SELECT id, original_title, slug, published_at, status
+       FROM articles
+       WHERE source_id = ?
+         AND id != ?
+         AND published_at >= ?
+         AND status IN ('discovered', 'extracting', 'generating', 'review', 'published')
+       ORDER BY published_at DESC, id DESC
+       LIMIT 50`,
+    )
+    .bind(sourceId, articleId, since)
+    .all<{
+      id: string;
+      original_title: string;
+      slug: string;
+      published_at: string;
+      status: string;
+    }>();
+
+  return (result.results ?? []).map((row) => ({
+    id: row.id,
+    originalTitle: row.original_title,
+    slug: row.slug,
+    publishedAt: row.published_at,
+    status: row.status,
+  }));
+}
+
 export async function getRevisionDetail(
   db: D1Database,
   revisionId: string,
@@ -779,20 +822,37 @@ export async function upsertSource(
     .run();
 }
 
+export type ArticleSelection = {
+  score: number;
+  reason: string | null;
+  duplicateOf: string | null;
+};
+
 export async function setArticleStatus(
   db: D1Database,
   articleId: string,
   status: Article["status"],
   error: string | null,
   lease: Job,
-): Promise<void> {
-  await db
+  selection?: ArticleSelection,
+): Promise<boolean> {
+  const result = await db
     .prepare(`UPDATE articles SET status = ?, last_error = ?, updated_at = ?
+      ${selection ? ", selection_score = ?, selection_reason = ?, duplicate_of = ?" : ""}
       WHERE id = ? AND id = ? AND status != 'published' AND published_revision_id IS NULL AND ${CURRENT_LEASE_SQL}
       ${status === "review" ? "AND EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')" : ""}
       ${status === "failed" ? "AND NOT EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')" : ""}`)
-    .bind(status, error, new Date().toISOString(), articleId, lease.articleId, ...leaseValues(lease))
+    .bind(
+      status,
+      error,
+      new Date().toISOString(),
+      ...(selection ? [selection.score, selection.reason, selection.duplicateOf] : []),
+      articleId,
+      lease.articleId,
+      ...leaseValues(lease),
+    )
     .run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 export async function saveSnapshot(

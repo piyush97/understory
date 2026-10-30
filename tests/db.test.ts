@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, insertArticle, insertRevision, rejectRevision, renewJobLease, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
-import { articleInput, seed, seedRevision, sqliteDb } from "./helpers/sqlite";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, insertArticle, insertRevision, listRecentSourceArticles, rejectRevision, renewJobLease, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
 function setup() { const db = sqliteDb(); databases.push(db); seed(db); return db; }
@@ -68,6 +68,56 @@ describe("job leases", () => {
     if (action === "fail") await failJob(db.db, job, "error");
     if (action === "defer") await deferJob(db.db, job, "2099-01-01", "budget");
     expect(db.sqlite.prepare("SELECT state FROM jobs").get()?.state).toBe("running");
+  });
+});
+
+describe("selection persistence", () => {
+  it("writes selection fields only through a live lease", async () => {
+    const db = setup();
+    const job = await lease(db);
+
+    expect(await setArticleStatus(db.db, "article", "generating", null, job, {
+      score: 62,
+      reason: "1200 words (+10)",
+      duplicateOf: null,
+    })).toBe(true);
+    expect(db.sqlite.prepare(
+      "SELECT status, selection_score, selection_reason, duplicate_of FROM articles",
+    ).get()).toMatchObject({
+      status: "generating",
+      selection_score: 62,
+      selection_reason: "1200 words (+10)",
+      duplicate_of: null,
+    });
+
+    db.sqlite.exec("UPDATE jobs SET lease_expires_at = '2000-01-01'");
+    expect(await setArticleStatus(db.db, "article", "skipped", "stale", job, {
+      score: 99,
+      reason: "stale",
+      duplicateOf: "other",
+    })).toBe(false);
+    expect(db.sqlite.prepare("SELECT status, selection_score FROM articles").get()).toMatchObject({
+      status: "generating",
+      selection_score: 62,
+    });
+  });
+
+  it("returns viable same-source articles inside the duplicate window, excluding the current article", async () => {
+    const db = setup();
+    db.sqlite.prepare(
+      "INSERT INTO sources (id, name, site_url, host) VALUES ('other-source', 'Other', 'https://other.example', 'other.example')",
+    ).run();
+    seedPublished(db, { id: "recent", originalTitle: "Vercel AI SDK 5", publishedAt: "2026-10-28T00:00:00.000Z" });
+    seedPublished(db, { id: "old", originalTitle: "Old post", publishedAt: "2026-09-01T00:00:00.000Z" });
+    seedPublished(db, { id: "other", originalTitle: "Other source", publishedAt: "2026-10-28T00:00:00.000Z", sourceId: "other-source" });
+
+    const rows = await listRecentSourceArticles(
+      db.db,
+      "source",
+      "article",
+      "2026-10-15T00:00:00.000Z",
+    );
+    expect(rows.map((row) => row.id)).toEqual(["recent"]);
   });
 });
 

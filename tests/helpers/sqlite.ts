@@ -70,6 +70,50 @@ export function seed(db: ReturnType<typeof sqliteDb>) {
   db.sqlite.prepare("INSERT INTO article_snapshots (id, article_id, source_hash, blocks_json, word_count, extractor_version, fetched_at) VALUES ('snapshot', 'article', 'hash', '[]', 300, 'test', ?)").run(new Date().toISOString());
 }
 
+export function seedPublished(
+  db: ReturnType<typeof sqliteDb>,
+  input: {
+    id: string;
+    slug?: string;
+    originalTitle?: string;
+    publishedAt: string;
+    selectionScore?: number;
+    duplicateOf?: string | null;
+    sourceId?: string;
+  },
+) {
+  const sourceId = input.sourceId ?? "source";
+  const slug = input.slug ?? input.id;
+  const originalTitle = input.originalTitle ?? `Article ${input.id}`;
+  const selectionScore = input.selectionScore ?? 0;
+  const duplicateOf = input.duplicateOf ?? null;
+  const snapshotId = `snapshot_${input.id}`;
+  const revisionId = `revision_${input.id}`;
+  const site = sourceId === "source"
+    ? { name: "Source", siteUrl: "https://example.com", host: "example.com" }
+    : { name: sourceId, siteUrl: `https://${sourceId}.example`, host: `${sourceId}.example` };
+  db.sqlite.prepare(
+    "INSERT OR IGNORE INTO sources (id, name, site_url, host) VALUES (?, ?, ?, ?)",
+  ).run(sourceId, site.name, site.siteUrl, site.host);
+  db.sqlite.prepare(
+    `INSERT INTO articles
+      (id, source_id, canonical_url, original_title, published_at, discovered_at, slug, status,
+       selection_score, duplicate_of, published_revision_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'published', ?, ?, ?)`,
+  ).run(input.id, sourceId, `https://example.com/${input.id}`, originalTitle, input.publishedAt,
+    input.publishedAt, slug, selectionScore, duplicateOf, revisionId);
+  db.sqlite.prepare(
+    `INSERT INTO article_snapshots
+      (id, article_id, source_hash, blocks_json, word_count, extractor_version, fetched_at)
+     VALUES (?, ?, ?, '[]', 500, 'test', ?)`,
+  ).run(snapshotId, input.id, `hash_${input.id}`, input.publishedAt);
+  db.sqlite.prepare(
+    `INSERT INTO explanation_revisions
+      (id, article_id, snapshot_id, status, content_json, provenance_json, model_id, prompt_version, schema_version)
+     VALUES (?, ?, ?, 'published', ?, '{}', 'model', 'prompt', 'schema')`,
+  ).run(revisionId, input.id, snapshotId, JSON.stringify(explanation));
+}
+
 export function seedRevision(db: ReturnType<typeof sqliteDb>, status = "draft") {
   db.sqlite.prepare("INSERT INTO explanation_revisions (id, article_id, snapshot_id, status, content_json, provenance_json, model_id, prompt_version, schema_version) VALUES ('revision', 'article', 'snapshot', ?, ?, '{}', 'model', 'prompt', 'schema')")
     .run(status, JSON.stringify(explanation));
