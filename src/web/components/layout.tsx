@@ -73,6 +73,7 @@ export function Layout({
         <meta name="twitter:description" content={description} />
         <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
         <link rel="alternate" type="application/rss+xml" title="Understory" href="/feed.xml" />
+        <link rel="alternate" type="text/plain" title="Understory for language models" href="/llms.txt" />
         <link rel="preload" href="/assets/fonts/barlow-condensed-600.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
         <link rel="preload" href="/assets/fonts/source-serif-4.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
         <link rel="stylesheet" href="/assets/styles.css" />

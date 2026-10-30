@@ -44,6 +44,7 @@ import {
 } from "../infrastructure/db";
 import { bool, dailyNeuronBudget, type Bindings, type QueueMessage } from "../shared/env";
 import { fetchPublicText } from "../shared/fetch";
+import { pingIndexNow } from "../shared/indexnow";
 import { parseDiscoveryHtml } from "./discovery";
 import { extractArticle, fetchArticlePage, toSnapshot } from "./extract";
 import { attemptGeneration, neuronsFromUsage } from "./generate";
@@ -440,6 +441,7 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   }, job, autoPublish ? { reviewer } : undefined);
 
   if (inserted && !autoPublish) await setArticleStatus(env.DB, article.id, "review", null, job);
+  else if (inserted) await pingIndexNow(env, [`/articles/${article.slug}`, "/"]);
   else if (!inserted) {
     const revision = await findRevisionKey(env.DB, { articleId: article.id, snapshotId, modelId: model, promptVersion: PROMPT_VERSION, schemaVersion: SCHEMA_VERSION });
     if (revision?.status === "draft") await setArticleStatus(env.DB, article.id, "review", null, job);

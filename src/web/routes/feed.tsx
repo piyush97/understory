@@ -54,6 +54,38 @@ export async function renderFeed(c: Context<AppEnv>) {
       site={site}
       siteUrl={c.env.SITE_URL}
       active={topicId ? null : "index"}
+      jsonLd={
+        topic
+          ? {
+              "@context": "https://schema.org",
+              "@type": "CollectionPage",
+              name: title,
+              description,
+              url: new URL(path, c.env.SITE_URL).toString(),
+              isPartOf: { "@type": "WebSite", name: "Understory", url: new URL("/", c.env.SITE_URL).toString() },
+            }
+          : {
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "WebSite",
+                  "@id": `${new URL("/", c.env.SITE_URL).toString()}#website`,
+                  name: "Understory",
+                  description,
+                  url: new URL("/", c.env.SITE_URL).toString(),
+                  inLanguage: "en",
+                  publisher: { "@id": `${new URL("/", c.env.SITE_URL).toString()}#org` },
+                },
+                {
+                  "@type": "Organization",
+                  "@id": `${new URL("/", c.env.SITE_URL).toString()}#org`,
+                  name: "Understory",
+                  url: new URL("/", c.env.SITE_URL).toString(),
+                  logo: new URL("/assets/favicon.svg", c.env.SITE_URL).toString(),
+                },
+              ],
+            }
+      }
     >
       <div class="page page--index">
         <section class="index-intro" aria-labelledby="index-title">

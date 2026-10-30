@@ -20,7 +20,7 @@ import {
   renderReview,
 } from "./routes/admin";
 import { renderApiArticle, renderApiArticles } from "./routes/api";
-import { renderFeedXml, renderRobots, renderSitemap } from "./routes/meta";
+import { renderFeedXml, renderLlmsFullTxt, renderLlmsTxt, renderRobots, renderSitemap } from "./routes/meta";
 import { renderError, renderNotFound } from "./routes/not-found";
 
 const app = new Hono<AppEnv>();
@@ -125,6 +125,14 @@ app.get("/api/articles/:slug", (c) => cachePage(c, 300, () => renderApiArticle(c
 app.get("/robots.txt", (c) => cachePage(c, 3600, () => renderRobots(c), { site: false }));
 app.get("/sitemap.xml", (c) => cachePage(c, 900, () => renderSitemap(c), { site: false }));
 app.get("/feed.xml", (c) => cachePage(c, 900, () => renderFeedXml(c), { site: false }));
+app.get("/llms.txt", (c) => cachePage(c, 900, () => renderLlmsTxt(c), { site: false }));
+app.get("/llms-full.txt", (c) => cachePage(c, 900, () => renderLlmsFullTxt(c), { site: false }));
+app.get("/:key{[A-Za-z0-9-]{8,128}\\.txt}", (c) => {
+  const file = c.req.param("key");
+  const key = c.env.INDEXNOW_KEY;
+  if (!key || file !== `${key}.txt`) return c.notFound();
+  return c.text(key, 200, { "Content-Type": "text/plain; charset=utf-8" });
+});
 
 app.get("/admin", (c) => renderAdmin(c));
 app.post("/admin/login", (c) => handleLogin(c));

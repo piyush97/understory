@@ -43,17 +43,7 @@ export async function renderArticle(c: Context<AppEnv>) {
       siteUrl={c.env.SITE_URL}
       active={null}
       ogType="article"
-      jsonLd={{
-        "@context": "https://schema.org",
-        "@type": "Article",
-        headline: explanation.contextHeadline,
-        description: explanation.dek,
-        datePublished: article.publishedAt,
-        author: { "@type": "Person", name: article.author ?? article.sourceName },
-        publisher: { "@type": "Organization", name: "Understory" },
-        isBasedOn: article.canonicalUrl,
-        url: new URL(`/articles/${article.slug}`, c.env.SITE_URL).toString(),
-      }}
+      jsonLd={articleJsonLd(c.env.SITE_URL, article, explanation, provenance.generatedAt ?? null)}
     >
       <article class="article-page">
         <ArticleHeader article={article} explanation={explanation} />
@@ -514,4 +504,52 @@ function RelatedStrip({ articles }: { articles: ArticleWithSource[] }) {
       </div>
     </section>
   );
+}
+
+export function articleJsonLd(
+  siteUrl: string,
+  article: PublishedArticle,
+  explanation: Explanation,
+  modifiedAt: string | null,
+): Record<string, unknown> {
+  const pageUrl = new URL(`/articles/${article.slug}`, siteUrl).toString();
+  const home = new URL("/", siteUrl).toString();
+  const publisher = {
+    "@type": "Organization",
+    name: "Understory",
+    url: home,
+    logo: { "@type": "ImageObject", url: new URL("/assets/favicon.svg", siteUrl).toString() },
+  };
+  const crumbs: Array<{ name: string; item: string }> = [{ name: "Index", item: home }];
+  if (article.topicId && article.topicLabel) {
+    crumbs.push({ name: article.topicLabel, item: new URL(`/?topic=${encodeURIComponent(article.topicId)}`, siteUrl).toString() });
+  }
+  crumbs.push({ name: explanation.contextHeadline, item: pageUrl });
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Article",
+        "@id": `${pageUrl}#article`,
+        headline: explanation.contextHeadline,
+        description: explanation.dek,
+        abstract: explanation.oneSentence,
+        datePublished: article.publishedAt,
+        dateModified: modifiedAt ?? article.publishedAt,
+        inLanguage: "en",
+        mainEntityOfPage: pageUrl,
+        url: pageUrl,
+        image: new URL("/assets/og.png", siteUrl).toString(),
+        author: { "@type": "Person", name: article.author ?? article.sourceName },
+        publisher,
+        isBasedOn: article.canonicalUrl,
+        ...(article.topicLabel ? { about: article.topicLabel, articleSection: article.topicLabel } : {}),
+        timeRequired: `PT${explanation.readingMinutes}M`,
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: crumbs.map((crumb, index) => ({ "@type": "ListItem", position: index + 1, name: crumb.name, item: crumb.item })),
+      },
+    ],
+  };
 }
