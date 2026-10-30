@@ -7,6 +7,7 @@ const db = vi.hoisted(() => ({
   getPublishedArticleBySlug: vi.fn(), getRevisionDetail: vi.fn(), getSiteState: vi.fn(),
   listAllPublished: vi.fn(), listFeedPage: vi.fn(), listPendingArticles: vi.fn(),
   listRelatedArticles: vi.fn(), listReviewQueue: vi.fn(), listSources: vi.fn(), listTopics: vi.fn(),
+  listRecentSkippedArticles: vi.fn(async () => []),
 }));
 vi.mock("../src/infrastructure/db", () => db);
 

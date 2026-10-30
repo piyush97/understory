@@ -6,6 +6,7 @@ import { verifyAccessJwt } from "../../shared/access";
 import {
   approveRevision,
   getRevisionDetail,
+  listRecentSkippedArticles,
   listReviewQueue,
   rejectRevision,
 } from "../../infrastructure/db";
@@ -65,7 +66,10 @@ export async function renderAdmin(c: Context<AppEnv>) {
   const auth = await authorize(c);
   if (!auth.ok) return renderLogin(c, auth.missingToken);
 
-  const queue = await listReviewQueue(c.env.DB);
+  const [queue, skipped] = await Promise.all([
+    listReviewQueue(c.env.DB),
+    listRecentSkippedArticles(c.env.DB),
+  ]);
   const site = c.get("site");
   const queued = c.req.query("queued") === "1";
   const rejected = c.req.query("rejected") === "1";
@@ -167,6 +171,53 @@ export async function renderAdmin(c: Context<AppEnv>) {
                   <span role="cell" class="admin-table__action">
                     <a class="text-link" href={`/admin/revisions/${revision.id}`}>
                       Open <IconArrowRight size={13} />
+                    </a>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section class="admin-queue" aria-labelledby="skipped-title">
+          <div class="section-head">
+            <h2 id="skipped-title">Recently skipped</h2>
+            <span class="section-head__meta">Last 20</span>
+          </div>
+          {skipped.length === 0 ? (
+            <p class="admin-help__fineprint">No skipped posts.</p>
+          ) : (
+            <div class="admin-table admin-table--skipped" role="table" aria-label="Recently skipped">
+              <div class="admin-table__head" role="row">
+                <span role="columnheader">Article</span>
+                <span role="columnheader">Source</span>
+                <span role="columnheader">Score</span>
+                <span role="columnheader">Reason</span>
+                <span role="columnheader">Skipped</span>
+                <span role="columnheader" />
+              </div>
+              {skipped.map((article) => (
+                <div class="admin-table__row admin-table__row--skipped" role="row">
+                  <span role="cell" class="admin-table__title">{article.originalTitle}</span>
+                  <span role="cell">
+                    <span class="admin-table__label">Source</span>
+                    <span class="admin-table__value">{article.sourceName}</span>
+                  </span>
+                  <span role="cell">
+                    <span class="admin-table__label">Score</span>
+                    <span class="admin-table__value">{article.selectionScore}</span>
+                  </span>
+                  <span role="cell">
+                    <span class="admin-table__label">Reason</span>
+                    <span class="admin-table__value">{article.selectionReason ?? "No reason recorded"}</span>
+                  </span>
+                  <span role="cell">
+                    <span class="admin-table__label">Skipped</span>
+                    <span class="admin-table__value">{relativeDate(article.skippedAt)}</span>
+                  </span>
+                  <span role="cell" class="admin-table__action">
+                    <a class="text-link" href={article.canonicalUrl} target="_blank" rel="noopener">
+                      Read source <IconArrowUpRight size={13} />
                     </a>
                   </span>
                 </div>

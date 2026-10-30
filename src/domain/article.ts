@@ -27,6 +27,9 @@ export type Article = {
   readingMinutes: number | null;
   publishedRevisionId: string | null;
   lastError: string | null;
+  selectionScore: number;
+  selectionReason: string | null;
+  duplicateOf: string | null;
   createdAt: string;
   updatedAt: string;
 };

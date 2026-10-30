@@ -9,6 +9,13 @@ import {
 } from "../domain/source";
 import { sourceSnapshotSchema } from "../domain/source";
 import {
+  duplicateWindowStart,
+  findDuplicate,
+  formatSelectionReason,
+  scoreSource,
+  SELECTION_DUPLICATE_WINDOW_DAYS,
+} from "../domain/selection";
+import {
   claimJob,
   completeJob,
   createJob,
@@ -24,10 +31,12 @@ import {
   insertArticle,
   insertRevision,
   listReadyJobs,
+  listRecentSourceArticles,
   recordBudgetUsage,
   releaseBudgetReservation,
   reserveBudget,
   renewJobLease,
+  requeueDuplicates,
   saveSnapshot,
   setArticleStatus,
   setMeta,
@@ -182,13 +191,16 @@ export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult>
     );
     const extracted = await extractArticle(fetched.html, fetched.finalUrl);
     if (extracted.wordCount < MIN_SOURCE_WORDS) {
-      await setArticleStatus(
+      const reason = `Source page yielded ${extracted.wordCount} words, below the ${MIN_SOURCE_WORDS}-word floor.`;
+      const skipped = await setArticleStatus(
         env.DB,
         article.id,
         "skipped",
-        `Source page yielded ${extracted.wordCount} words, below the ${MIN_SOURCE_WORDS}-word floor.`,
+        reason,
         job,
+        { score: 0, reason, duplicateOf: null },
       );
+      if (skipped) await requeueDuplicates(env.DB, article.id);
       return { ok: true, detail: `Skipped thin source (${extracted.wordCount} words).` };
     }
 
@@ -221,7 +233,36 @@ export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult>
       }, job);
     }
 
-    await setArticleStatus(env.DB, article.id, "generating", null, job);
+    const selection = scoreSource({
+      title: article.originalTitle,
+      url: article.canonicalUrl,
+      blocks: parsed.data.blocks,
+      wordCount: parsed.data.wordCount,
+    });
+    const recent = await listRecentSourceArticles(
+      env.DB,
+      article.sourceId,
+      article.id,
+      duplicateWindowStart(article.publishedAt, SELECTION_DUPLICATE_WINDOW_DAYS),
+    );
+    const duplicate = findDuplicate(article.originalTitle, recent);
+    const reason = duplicate
+      ? `duplicate of ${duplicate.slug}`
+      : formatSelectionReason(selection.reasons) || null;
+    const skipped = bool(env.SELECTION_ENFORCE) && (duplicate !== null || selection.decision === "skip");
+    const updated = await setArticleStatus(
+      env.DB,
+      article.id,
+      skipped ? "skipped" : "generating",
+      skipped ? reason : null,
+      job,
+      { score: selection.score, reason, duplicateOf: duplicate?.id ?? null },
+    );
+    if (!updated) return { ok: true, detail: "Discarded stale extraction result." };
+    if (skipped) {
+      await requeueDuplicates(env.DB, article.id);
+      return { ok: true, detail: `Skipped by selection gate: ${reason ?? "low score"}` };
+    }
     const jobId = `job_${crypto.randomUUID()}`;
     await createJob(env.DB, {
       id: jobId,
@@ -236,7 +277,12 @@ export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult>
     }, job);
 
     try {
-      await env.PIPELINE_QUEUE.send({ kind: "job", jobId });
+      const ready = await env.DB.prepare(`SELECT id FROM jobs WHERE id = ? AND state = 'pending'
+        AND EXISTS (SELECT 1 FROM jobs lease WHERE lease.id = ? AND lease.lease_token = ?
+          AND lease.article_id = ? AND lease.state = 'running'
+          AND lease.lease_expires_at > MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`)
+        .bind(jobId, job.id, job.leaseToken, article.id, new Date().toISOString()).first();
+      if (ready) await env.PIPELINE_QUEUE.send({ kind: "job", jobId });
     } catch {
       // Ready-job sweep will retry.
     }
@@ -248,7 +294,8 @@ export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult>
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await setArticleStatus(env.DB, article.id, "failed", message.slice(0, 500), job);
+    const failed = await setArticleStatus(env.DB, article.id, "failed", message.slice(0, 500), job);
+    if (failed && job.attempts >= 3) await requeueDuplicates(env.DB, article.id);
     throw error;
   }
 }
@@ -352,7 +399,9 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   if (!generation || !generation.ok || !generation.explanation) {
     const issues = generation?.issues ?? [{ path: "(root)", message: "No generation result" }];
     const message = issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ").slice(0, 700);
-    await setArticleStatus(env.DB, article.id, "failed", message, job);
+    if (await setArticleStatus(env.DB, article.id, "failed", message, job)) {
+      await requeueDuplicates(env.DB, article.id);
+    }
     // A schema or editorial rejection is deterministic; retrying the job only
     // repeats the same model call and burns the daily neuron budget.
     await failJob(env.DB, job, message, { terminal: true });
@@ -429,6 +478,10 @@ export async function processJob(env: Bindings, jobId: string, leaseSeconds = 12
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (job.kind === "generate" && job.articleId && job.attempts >= 3
+      && await setArticleStatus(env.DB, job.articleId, "failed", message, job)) {
+      await requeueDuplicates(env.DB, job.articleId);
+    }
     await failJob(env.DB, job, message, { terminal: job.attempts >= 3 });
     return { ok: false, detail: message };
   } finally {

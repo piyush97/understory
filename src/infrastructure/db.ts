@@ -11,6 +11,7 @@ import type {
 import type { FeedCursor } from "../domain/pagination";
 import { validateExplanation, type Explanation } from "../domain/explanation";
 import { estimateReadingMinutes } from "../domain/source";
+import { LEAD_WINDOW_DAYS } from "../domain/selection";
 
 type ArticleRow = {
   id: string;
@@ -29,6 +30,9 @@ type ArticleRow = {
   reading_minutes: number | null;
   published_revision_id: string | null;
   last_error: string | null;
+  selection_score: number;
+  selection_reason: string | null;
+  duplicate_of: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -92,6 +96,9 @@ function mapArticle(row: ArticleRow): Article {
     readingMinutes: row.reading_minutes,
     publishedRevisionId: row.published_revision_id,
     lastError: row.last_error,
+    selectionScore: row.selection_score,
+    selectionReason: row.selection_reason,
+    duplicateOf: row.duplicate_of,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -178,20 +185,34 @@ export async function listPendingArticles(
 }
 
 export async function getFeedLead(db: D1Database): Promise<PublishedArticle | null> {
-  const result = await db
+  const windowStart = new Date(Date.now() - LEAD_WINDOW_DAYS * 86_400_000).toISOString();
+  const select = `SELECT a.*, s.name AS source_name, s.site_url AS source_site_url, s.host AS source_host,
+                        t.label AS topic_label,
+                        r.content_json AS revision_content, r.provenance_json AS revision_provenance
+                 FROM articles a
+                 JOIN sources s ON s.id = a.source_id
+                 LEFT JOIN topics t ON t.id = a.topic_id
+                 JOIN explanation_revisions r ON r.id = a.published_revision_id`;
+  let result = await db
     .prepare(
-      `SELECT a.*, s.name AS source_name, s.site_url AS source_site_url, s.host AS source_host,
-              t.label AS topic_label,
-              r.content_json AS revision_content, r.provenance_json AS revision_provenance
-       FROM articles a
-       JOIN sources s ON s.id = a.source_id
-       LEFT JOIN topics t ON t.id = a.topic_id
-       JOIN explanation_revisions r ON r.id = a.published_revision_id
-       WHERE a.status = 'published'
-       ORDER BY a.published_at DESC, a.id DESC
+      `${select}
+       WHERE a.status = 'published' AND a.duplicate_of IS NULL AND a.published_at >= ?
+       ORDER BY a.selection_score DESC, a.published_at DESC, a.id DESC
        LIMIT 1`,
     )
+    .bind(windowStart)
     .first<ArticleSourceRow & { revision_content: string; revision_provenance: string }>();
+
+  if (!result) {
+    result = await db
+      .prepare(
+        `${select}
+         WHERE a.status = 'published'
+         ORDER BY a.published_at DESC, a.id DESC
+         LIMIT 1`,
+      )
+      .first<ArticleSourceRow & { revision_content: string; revision_provenance: string }>();
+  }
 
   if (!result) return null;
   return {
@@ -439,6 +460,95 @@ export async function listReviewQueue(
   }));
 }
 
+export type SkippedArticle = {
+  id: string;
+  originalTitle: string;
+  canonicalUrl: string;
+  sourceName: string;
+  selectionScore: number;
+  selectionReason: string | null;
+  skippedAt: string;
+};
+
+export async function listRecentSkippedArticles(
+  db: D1Database,
+  limit = 20,
+): Promise<SkippedArticle[]> {
+  const result = await db
+    .prepare(
+      `SELECT a.id, a.original_title, a.canonical_url, s.name AS source_name,
+              a.selection_score, a.selection_reason, a.updated_at
+       FROM articles a
+       JOIN sources s ON s.id = a.source_id
+       WHERE a.status = 'skipped'
+       ORDER BY a.updated_at DESC, a.id DESC
+       LIMIT ?`,
+    )
+    .bind(Math.min(Math.max(limit, 1), 100))
+    .all<{
+      id: string;
+      original_title: string;
+      canonical_url: string;
+      source_name: string;
+      selection_score: number;
+      selection_reason: string | null;
+      updated_at: string;
+    }>();
+
+  return (result.results ?? []).map((row) => ({
+    id: row.id,
+    originalTitle: row.original_title,
+    canonicalUrl: row.canonical_url,
+    sourceName: row.source_name,
+    selectionScore: row.selection_score,
+    selectionReason: row.selection_reason,
+    skippedAt: row.updated_at,
+  }));
+}
+
+export type RecentSourceArticle = {
+  id: string;
+  originalTitle: string;
+  slug: string;
+  publishedAt: string;
+  status: string;
+};
+
+export async function listRecentSourceArticles(
+  db: D1Database,
+  sourceId: string,
+  articleId: string,
+  since: string,
+): Promise<RecentSourceArticle[]> {
+  const result = await db
+    .prepare(
+      `SELECT id, original_title, slug, published_at, status
+       FROM articles
+       WHERE source_id = ?
+         AND id != ?
+         AND published_at >= ?
+         AND status IN ('discovered', 'extracting', 'generating', 'review', 'published')
+       ORDER BY published_at DESC, id DESC
+       LIMIT 50`,
+    )
+    .bind(sourceId, articleId, since)
+    .all<{
+      id: string;
+      original_title: string;
+      slug: string;
+      published_at: string;
+      status: string;
+    }>();
+
+  return (result.results ?? []).map((row) => ({
+    id: row.id,
+    originalTitle: row.original_title,
+    slug: row.slug,
+    publishedAt: row.published_at,
+    status: row.status,
+  }));
+}
+
 export async function getRevisionDetail(
   db: D1Database,
   revisionId: string,
@@ -592,6 +702,7 @@ export async function rejectRevision(
       AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)
       AND NOT EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')`)
       .bind(now, revisionId, reviewId),
+    ...requeueDuplicateStatements(db, null, now, reviewId),
   ]);
   return (results[0]?.meta.changes ?? 0) > 0;
 }
@@ -774,20 +885,74 @@ export async function upsertSource(
     .run();
 }
 
+export async function requeueDuplicates(
+  db: D1Database,
+  survivorId: string,
+): Promise<number> {
+  const results = await db.batch(requeueDuplicateStatements(db, survivorId, new Date().toISOString()));
+  return results[1]?.meta.changes ?? 0;
+}
+
+function requeueDuplicateStatements(
+  db: D1Database,
+  survivorId: string | null,
+  now: string,
+  reviewId: string | null = null,
+): D1PreparedStatement[] {
+  const where = `articles.status = 'skipped' AND articles.duplicate_of = COALESCE(?, (
+    SELECT r.article_id FROM reviews v JOIN explanation_revisions r ON r.id = v.revision_id
+    WHERE v.id = ? AND v.decision = 'rejected'
+  )) AND EXISTS (SELECT 1 FROM articles survivor
+    WHERE survivor.id = articles.duplicate_of AND survivor.status IN ('failed', 'skipped')
+      AND survivor.published_revision_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM explanation_revisions
+        WHERE article_id = survivor.id AND status IN ('draft', 'published')))`;
+  // Both statements select the same rows inside one transaction; reset jobs before clearing duplicate_of.
+  return [
+    db.prepare(`INSERT INTO jobs (id, kind, article_id, payload_json, idempotency_key, next_run_at, state, attempts)
+      SELECT 'job_extract_' || id, 'extract', id, '{}', 'extract:' || id, ?, 'pending', 0
+      FROM articles WHERE ${where}
+      ON CONFLICT (idempotency_key) DO UPDATE SET
+        state = 'pending', attempts = 0, lease_token = NULL, lease_expires_at = NULL,
+        next_run_at = excluded.next_run_at, last_error = NULL, updated_at = excluded.next_run_at`)
+      .bind(now, survivorId, reviewId),
+    db.prepare(`UPDATE articles SET status = 'discovered', duplicate_of = NULL,
+      selection_reason = NULL, last_error = NULL, updated_at = ? WHERE ${where}`)
+      .bind(now, survivorId, reviewId),
+  ];
+}
+
+export type ArticleSelection = {
+  score: number;
+  reason: string | null;
+  duplicateOf: string | null;
+};
+
 export async function setArticleStatus(
   db: D1Database,
   articleId: string,
   status: Article["status"],
   error: string | null,
   lease: Job,
-): Promise<void> {
-  await db
+  selection?: ArticleSelection,
+): Promise<boolean> {
+  const result = await db
     .prepare(`UPDATE articles SET status = ?, last_error = ?, updated_at = ?
+      ${selection ? ", selection_score = ?, selection_reason = ?, duplicate_of = ?" : ""}
       WHERE id = ? AND id = ? AND status != 'published' AND published_revision_id IS NULL AND ${CURRENT_LEASE_SQL}
       ${status === "review" ? "AND EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')" : ""}
       ${status === "failed" ? "AND NOT EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id AND status = 'draft')" : ""}`)
-    .bind(status, error, new Date().toISOString(), articleId, lease.articleId, ...leaseValues(lease))
+    .bind(
+      status,
+      error,
+      new Date().toISOString(),
+      ...(selection ? [selection.score, selection.reason, selection.duplicateOf] : []),
+      articleId,
+      lease.articleId,
+      ...leaseValues(lease),
+    )
     .run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 export async function saveSnapshot(

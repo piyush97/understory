@@ -3,7 +3,7 @@ import app from "../src/web/index";
 import type { Bindings } from "../src/shared/env";
 import * as dbModule from "../src/infrastructure/db";
 
-const db = vi.hoisted(() => ({ approveRevision: vi.fn(), listReviewQueue: vi.fn() }));
+const db = vi.hoisted(() => ({ approveRevision: vi.fn(), listReviewQueue: vi.fn(), listRecentSkippedArticles: vi.fn(async () => []) }));
 vi.mock("../src/infrastructure/db", () => ({
   ...db,
   getSiteState: vi.fn(async () => ({ publicationVersion: "1" })),
