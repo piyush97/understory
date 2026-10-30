@@ -3,6 +3,7 @@ import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AppEnv } from "../../shared/env";
 import { bool } from "../../shared/env";
 import { verifyAccessJwt } from "../../shared/access";
+import { pingIndexNow } from "../../shared/indexnow";
 import {
   approveRevision,
   getRevisionDetail,
@@ -529,6 +530,12 @@ export async function handleApprove(c: Context<AppEnv>) {
   const note = typeof body.note === "string" ? body.note.trim().slice(0, 800) : null;
   const result = await approveRevision(c.env.DB, id, auth.reviewer, note);
   if (!result) return c.notFound();
+  const ping = pingIndexNow(c.env, [`/articles/${result.slug}`, "/"]);
+  try {
+    c.executionCtx.waitUntil(ping);
+  } catch {
+    await ping;
+  }
   return c.redirect(`/articles/${result.slug}`);
 }
 

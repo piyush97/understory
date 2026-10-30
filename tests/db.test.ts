@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, insertArticle, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, insertArticle, listAllPublished, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
 import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
@@ -693,5 +693,37 @@ describe("schema", () => {
     expect(columns.map((column) => column.name)).toEqual(
       expect.arrayContaining(["selection_score", "selection_reason", "duplicate_of"]),
     );
+  });
+});
+
+describe("discovery listings", () => {
+  it("dates sitemap entries by the published revision, not pipeline touches", async () => {
+    const db = setup();
+    seedPublished(db, { id: "live", publishedAt: "2026-10-01T00:00:00.000Z" });
+    db.sqlite.exec(`UPDATE explanation_revisions SET reviewed_at = '2026-10-05T00:00:00.000Z' WHERE id = 'revision_live';
+      UPDATE articles SET updated_at = '2026-10-30T00:00:00.000Z' WHERE id = 'live';`);
+    seedPublished(db, { id: "unreviewed", publishedAt: "2026-10-02T00:00:00.000Z" });
+    db.sqlite.exec("UPDATE explanation_revisions SET reviewed_at = NULL WHERE id = 'revision_unreviewed'");
+
+    const rows = await listAllPublished(db.db);
+    expect(rows.find((row) => row.slug === "live")?.updatedAt).toBe("2026-10-05T00:00:00.000Z");
+    expect(rows.find((row) => row.slug === "unreviewed")?.updatedAt).toBe("2026-10-02T00:00:00.000Z");
+  });
+
+  it("lists only published articles for llms.txt and llms-full.txt", async () => {
+    const db = setup();
+    seedPublished(db, { id: "pub", originalTitle: "Published one", publishedAt: "2026-10-01T00:00:00.000Z" });
+    db.sqlite.exec(`INSERT INTO articles (id, source_id, canonical_url, original_title, published_at, discovered_at, slug, status)
+      VALUES ('skip', 'source', 'https://example.com/skip', 'Skipped', '2026-10-03T00:00:00.000Z', '2026-10-03T00:00:00.000Z', 'skip', 'skipped')`);
+
+    const index = await listPublishedIndex(db.db);
+    expect(index.map((row) => row.slug)).toContain("pub");
+    expect(index.map((row) => row.slug)).not.toContain("skip");
+    expect(index.find((row) => row.slug === "pub")).toMatchObject({ headline: "Published one", sourceName: "Source" });
+
+    const content = await listRecentPublishedContent(db.db, 10);
+    expect(content.map((row) => row.slug)).toContain("pub");
+    expect(content.map((row) => row.slug)).not.toContain("skip");
+    expect(JSON.parse(content.find((row) => row.slug === "pub")!.content).contextHeadline).toBeTruthy();
   });
 });

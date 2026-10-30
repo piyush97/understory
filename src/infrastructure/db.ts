@@ -750,12 +750,15 @@ export async function getSiteState(db: D1Database): Promise<SiteState> {
 export async function listAllPublished(
   db: D1Database,
 ): Promise<Array<{ slug: string; publishedAt: string; updatedAt: string; topicId: string | null }>> {
+  // updatedAt is when the published revision went live; pipeline jobs touch
+  // articles.updated_at without changing what readers see.
   const result = await db
     .prepare(
-      `SELECT slug, published_at, updated_at, topic_id
-       FROM articles
-       WHERE status = 'published'
-       ORDER BY published_at DESC, id DESC`,
+      `SELECT a.slug, a.published_at, COALESCE(r.reviewed_at, a.published_at) AS updated_at, a.topic_id
+       FROM articles a
+       LEFT JOIN explanation_revisions r ON r.id = a.published_revision_id
+       WHERE a.status = 'published'
+       ORDER BY a.published_at DESC, a.id DESC`,
     )
     .all<{ slug: string; published_at: string; updated_at: string; topic_id: string | null }>();
   return (result.results ?? []).map((row) => ({
@@ -763,6 +766,66 @@ export async function listAllPublished(
     publishedAt: row.published_at,
     updatedAt: row.updated_at,
     topicId: row.topic_id,
+  }));
+}
+
+export type DiscoveryEntry = {
+  slug: string;
+  headline: string;
+  dek: string | null;
+  sourceName: string;
+  topicLabel: string | null;
+  publishedAt: string;
+};
+
+// Lean listing for /llms.txt: no revision bodies.
+export async function listPublishedIndex(db: D1Database, limit = 2000): Promise<DiscoveryEntry[]> {
+  const result = await db
+    .prepare(
+      `SELECT a.slug, COALESCE(a.context_headline, a.original_title) AS headline, a.dek,
+              s.name AS source_name, t.label AS topic_label, a.published_at
+       FROM articles a
+       JOIN sources s ON s.id = a.source_id
+       LEFT JOIN topics t ON t.id = a.topic_id
+       WHERE a.status = 'published'
+       ORDER BY a.published_at DESC, a.id DESC
+       LIMIT ?`,
+    )
+    .bind(Math.min(Math.max(limit, 1), 5000))
+    .all<{ slug: string; headline: string; dek: string | null; source_name: string; topic_label: string | null; published_at: string }>();
+  return (result.results ?? []).map((row) => ({
+    slug: row.slug,
+    headline: row.headline,
+    dek: row.dek,
+    sourceName: row.source_name,
+    topicLabel: row.topic_label,
+    publishedAt: row.published_at,
+  }));
+}
+
+// Newest published revisions for /llms-full.txt.
+export async function listRecentPublishedContent(
+  db: D1Database,
+  limit = 50,
+): Promise<Array<{ slug: string; canonicalUrl: string; sourceName: string; publishedAt: string; content: string }>> {
+  const result = await db
+    .prepare(
+      `SELECT a.slug, a.canonical_url, s.name AS source_name, a.published_at, r.content_json
+       FROM articles a
+       JOIN sources s ON s.id = a.source_id
+       JOIN explanation_revisions r ON r.id = a.published_revision_id
+       WHERE a.status = 'published'
+       ORDER BY a.published_at DESC, a.id DESC
+       LIMIT ?`,
+    )
+    .bind(Math.min(Math.max(limit, 1), 100))
+    .all<{ slug: string; canonical_url: string; source_name: string; published_at: string; content_json: string }>();
+  return (result.results ?? []).map((row) => ({
+    slug: row.slug,
+    canonicalUrl: row.canonical_url,
+    sourceName: row.source_name,
+    publishedAt: row.published_at,
+    content: row.content_json,
   }));
 }
 

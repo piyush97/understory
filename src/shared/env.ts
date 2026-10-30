@@ -19,6 +19,7 @@ export type Bindings = {
   OPML_URL?: string;
   REQUIRE_ACCESS_JWT?: string;
   SEED_ON_START?: string;
+  INDEXNOW_KEY?: string;
 };
 
 export type Variables = {
