@@ -749,19 +749,20 @@ export async function getSiteState(db: D1Database): Promise<SiteState> {
 
 export async function listAllPublished(
   db: D1Database,
-): Promise<Array<{ slug: string; publishedAt: string; updatedAt: string }>> {
+): Promise<Array<{ slug: string; publishedAt: string; updatedAt: string; topicId: string | null }>> {
   const result = await db
     .prepare(
-      `SELECT slug, published_at, updated_at
+      `SELECT slug, published_at, updated_at, topic_id
        FROM articles
        WHERE status = 'published'
        ORDER BY published_at DESC, id DESC`,
     )
-    .all<{ slug: string; published_at: string; updated_at: string }>();
+    .all<{ slug: string; published_at: string; updated_at: string; topic_id: string | null }>();
   return (result.results ?? []).map((row) => ({
     slug: row.slug,
     publishedAt: row.published_at,
     updatedAt: row.updated_at,
+    topicId: row.topic_id,
   }));
 }
 
