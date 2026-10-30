@@ -2485,6 +2485,66 @@ html:not(.js) .js-only {
   font-size: var(--fs-label);
 }
 
+.admin-table--skipped .admin-table__head,
+.admin-table--skipped .admin-table__row--skipped {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 3rem minmax(0, 2fr) 4.5rem 7rem;
+  align-items: start;
+}
+
+.admin-table--skipped .admin-table__row--skipped > [role="cell"] {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-table--skipped .admin-table__label {
+  display: none;
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.admin-table--skipped .admin-table__value {
+  min-width: 0;
+}
+
+.admin-table--skipped .admin-table__action .text-link {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 1000px) {
+  .admin-table--skipped .admin-table__head {
+    display: none;
+  }
+
+  .admin-table--skipped .admin-table__row--skipped {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 14px 0;
+  }
+
+  .admin-table--skipped .admin-table__row--skipped > [role="cell"] {
+    display: grid;
+    grid-template-columns: 5rem minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .admin-table--skipped .admin-table__row--skipped > .admin-table__title,
+  .admin-table--skipped .admin-table__row--skipped > .admin-table__action {
+    display: block;
+    text-align: left;
+  }
+
+  .admin-table--skipped .admin-table__label {
+    display: block;
+  }
+}
+
 .admin-help {
   max-width: 68ch;
   margin-top: 44px;

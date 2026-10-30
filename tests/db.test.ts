@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, insertArticle, insertRevision, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, insertArticle, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
 import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
@@ -118,6 +118,73 @@ describe("selection persistence", () => {
       "2026-10-15T00:00:00.000Z",
     );
     expect(rows.map((row) => row.id)).toEqual(["recent"]);
+  });
+});
+
+describe("recently skipped articles", () => {
+  it("lists the most recently skipped articles first", async () => {
+    const db = setup();
+    db.sqlite.exec(`
+      INSERT INTO articles (id, source_id, canonical_url, original_title, published_at, discovered_at, slug, status, selection_score, selection_reason, updated_at)
+      VALUES
+        ('skip-old', 'source', 'https://example.com/skip-old', 'Old skip', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'skip-old', 'skipped', 10, 'thin', '2026-10-01T00:00:00.000Z'),
+        ('skip-new', 'source', 'https://example.com/skip-new', 'New skip', '2026-10-02T00:00:00.000Z', '2026-10-02T00:00:00.000Z', 'skip-new', 'skipped', 30, 'release', '2026-10-02T00:00:00.000Z');
+    `);
+
+    expect(await listRecentSkippedArticles(db.db, 1)).toEqual([{
+      id: "skip-new",
+      originalTitle: "New skip",
+      canonicalUrl: "https://example.com/skip-new",
+      sourceName: "Source",
+      selectionScore: 30,
+      selectionReason: "release",
+      skippedAt: "2026-10-02T00:00:00.000Z",
+    }]);
+  });
+
+  it("excludes other statuses and breaks updated-at ties by descending id", async () => {
+    const db = setup();
+    const insert = db.sqlite.prepare(`
+      INSERT INTO articles (id, source_id, canonical_url, original_title, published_at, discovered_at, slug, status, updated_at)
+      VALUES (?, 'source', ?, ?, '2026-10-01', '2026-10-01', ?, ?, ?)
+    `);
+    for (const status of ["discovered", "extracting", "generating", "review", "published", "failed"]) {
+      insert.run(status, `https://example.com/${status}`, status, status, status, "2026-10-03T00:00:00.000Z");
+    }
+    insert.run("skip-a", "https://example.com/skip-a", "A", "skip-a", "skipped", "2026-10-02T00:00:00.000Z");
+    insert.run("skip-z", "https://example.com/skip-z", "Z", "skip-z", "skipped", "2026-10-02T00:00:00.000Z");
+    insert.run("skip-old", "https://example.com/skip-old", "Old", "skip-old", "skipped", "2026-10-01T00:00:00.000Z");
+
+    const rows = await listRecentSkippedArticles(db.db);
+    expect(rows.map((row) => row.id)).toEqual(["skip-z", "skip-a", "skip-old"]);
+    expect(rows[0]?.selectionReason).toBeNull();
+  });
+
+  it.each([
+    { limit: undefined, count: 20 },
+    { limit: -5, count: 1 },
+    { limit: 0, count: 1 },
+    { limit: 1, count: 1 },
+    { limit: 25, count: 25 },
+    { limit: 100, count: 100 },
+    { limit: 200, count: 100 },
+  ])("defaults to 20 and clamps limit $limit to $count rows", async ({ limit, count }) => {
+    const db = setup();
+    const insert = db.sqlite.prepare(`
+      INSERT INTO articles (id, source_id, canonical_url, original_title, published_at, discovered_at, slug, status, updated_at)
+      VALUES (?, 'source', ?, 'Skipped', '2026-10-01', '2026-10-01', ?, 'skipped', '2026-10-02T00:00:00.000Z')
+    `);
+    for (let i = 0; i < 105; i++) {
+      const id = `skip-${String(i).padStart(3, "0")}`;
+      insert.run(id, `https://example.com/${id}`, id);
+    }
+
+    expect(await listRecentSkippedArticles(db.db, limit)).toHaveLength(count);
+  });
+
+  it("returns an empty list when no articles are skipped", async () => {
+    const db = setup();
+    expect(await listRecentSkippedArticles(db.db)).toEqual([]);
   });
 });
 

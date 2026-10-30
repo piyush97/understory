@@ -460,6 +460,52 @@ export async function listReviewQueue(
   }));
 }
 
+export type SkippedArticle = {
+  id: string;
+  originalTitle: string;
+  canonicalUrl: string;
+  sourceName: string;
+  selectionScore: number;
+  selectionReason: string | null;
+  skippedAt: string;
+};
+
+export async function listRecentSkippedArticles(
+  db: D1Database,
+  limit = 20,
+): Promise<SkippedArticle[]> {
+  const result = await db
+    .prepare(
+      `SELECT a.id, a.original_title, a.canonical_url, s.name AS source_name,
+              a.selection_score, a.selection_reason, a.updated_at
+       FROM articles a
+       JOIN sources s ON s.id = a.source_id
+       WHERE a.status = 'skipped'
+       ORDER BY a.updated_at DESC, a.id DESC
+       LIMIT ?`,
+    )
+    .bind(Math.min(Math.max(limit, 1), 100))
+    .all<{
+      id: string;
+      original_title: string;
+      canonical_url: string;
+      source_name: string;
+      selection_score: number;
+      selection_reason: string | null;
+      updated_at: string;
+    }>();
+
+  return (result.results ?? []).map((row) => ({
+    id: row.id,
+    originalTitle: row.original_title,
+    canonicalUrl: row.canonical_url,
+    sourceName: row.source_name,
+    selectionScore: row.selection_score,
+    selectionReason: row.selection_reason,
+    skippedAt: row.updated_at,
+  }));
+}
+
 export type RecentSourceArticle = {
   id: string;
   originalTitle: string;
