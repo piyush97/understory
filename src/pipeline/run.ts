@@ -400,6 +400,12 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   if (!generation || !generation.ok || !generation.explanation) {
     const issues = generation?.issues ?? [{ path: "(root)", message: "No generation result" }];
     const message = issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ").slice(0, 700);
+    // Unparseable/empty output is nondeterministic: retry the job with backoff
+    // before giving up, instead of losing the article to one bad sample.
+    if (generation?.retryable && job.attempts < 3) {
+      await failJob(env.DB, job, message);
+      return { ok: true, detail: `Generation output malformed; retrying: ${message}`, deferred: true };
+    }
     if (await setArticleStatus(env.DB, article.id, "failed", message, job)) {
       await requeueDuplicates(env.DB, article.id);
     }

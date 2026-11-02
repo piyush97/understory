@@ -246,6 +246,7 @@ describe("model calls", () => {
     const result = await attemptGeneration(ai, "test-model", material, null);
     expect(result.ok).toBe(false);
     expect(result.issues[0]?.message).toMatch(/parseable JSON/);
+    expect(result.retryable).toBe(true);
   });
 
   it("reserves zero as a valid budget kill switch", () => {
