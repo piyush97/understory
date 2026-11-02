@@ -16,6 +16,8 @@ export type GenerationAttempt = {
   issues: ValidationIssue[];
   rawText: string;
   usage: { inputTokens: number | null; outputTokens: number | null } | null;
+  /** Malformed or empty output is sampling noise; a later fresh attempt can succeed. */
+  retryable?: boolean;
 };
 
 export async function attemptGeneration(
@@ -51,6 +53,7 @@ export async function attemptGeneration(
       issues: [{ path: "(root)", message: emptyOutputMessage(output) }],
       rawText,
       usage: toTokenUsage(output.usage),
+      retryable: true,
     };
   }
 
@@ -65,6 +68,7 @@ export async function attemptGeneration(
       ),
       rawText,
       usage: toTokenUsage(output.usage),
+      retryable: true,
     };
   }
 
