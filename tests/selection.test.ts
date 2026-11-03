@@ -160,6 +160,42 @@ describe("duplicate matching", () => {
     expect(isNearDuplicate("Vercel AI SDK 5", "Vercel edge runtime")).toBe(false);
   });
 
+  it("keeps numbered tutorial instalments distinct", () => {
+    const base = "Python REST APIs With Flask, Connexion, and SQLAlchemy - Part";
+    expect(isNearDuplicate(`${base} 1`, `${base} 2`)).toBe(false);
+    expect(isNearDuplicate(`${base} 2`, `${base} 3`)).toBe(false);
+    expect(isNearDuplicate(`${base} 1`, `${base} 3`)).toBe(false);
+    expect(isNearDuplicate(`${base} 1`, `${base} 1`)).toBe(true);
+    expect(isNearDuplicate("Caching deep dive - Episode 4", "Caching deep dive - Episode 5")).toBe(false);
+    expect(isNearDuplicate("Caching deep dive - Chapter 4", "Caching deep dive - Chapter 5")).toBe(false);
+  });
+
+  it("keeps titles with different vendor or product qualifiers distinct", () => {
+    expect(isNearDuplicate(
+      "Blazor welcomes open-source contributions from Infragistics",
+      "Blazor welcomes open-source contributions from Syncfusion",
+    )).toBe(false);
+    expect(isNearDuplicate(
+      "Building APIs with the Contoso SDK",
+      "Building APIs with the Fabrikam SDK",
+    )).toBe(false);
+  });
+
+  it("does not return a candidate for a distinct instalment or vendor", () => {
+    const candidates = [
+      { id: "flask-2", originalTitle: "Python REST APIs With Flask, Connexion, and SQLAlchemy - Part 2", slug: "flask-2", publishedAt: "2026-10-27T00:00:00.000Z" },
+      { id: "blazor-sync", originalTitle: "Blazor welcomes open-source contributions from Syncfusion", slug: "blazor-sync", publishedAt: "2026-10-28T00:00:00.000Z" },
+    ];
+    expect(findDuplicate(
+      "Python REST APIs With Flask, Connexion, and SQLAlchemy - Part 1",
+      candidates,
+    )).toBeNull();
+    expect(findDuplicate(
+      "Blazor welcomes open-source contributions from Infragistics",
+      candidates,
+    )).toBeNull();
+  });
+
   it("returns the earliest duplicate candidate", () => {
     const duplicate = findDuplicate("Vercel AI SDK 5", [
       { id: "new", originalTitle: "Vercel AI SDK 5 is now available", slug: "new", publishedAt: "2026-10-28T00:00:00.000Z" },

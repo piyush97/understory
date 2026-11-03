@@ -433,6 +433,161 @@ export async function getCounts(
   };
 }
 
+export async function getPipelineStatus(db: D1Database, now = new Date()) {
+  const day = now.toISOString().slice(0, 10);
+  const [counts, budget, recent] = await Promise.all([
+    db.prepare("SELECT state, COUNT(*) AS count FROM jobs GROUP BY state")
+      .all<{ state: string; count: number }>(),
+    db.prepare("SELECT used_neurons, reserved_neurons FROM ai_budget WHERE day = ?")
+      .bind(day).first<{ used_neurons: number; reserved_neurons: number }>(),
+    db.prepare(`SELECT j.id, j.kind, j.state, SUBSTR(a.original_title, 1, 200) AS articleTitle,
+        j.updated_at AS updatedAt,
+        CASE
+          WHEN LOWER(j.last_error) LIKE '%budget%' THEN 'AI budget exhausted'
+          WHEN LOWER(j.last_error) LIKE '%validat%' THEN 'Validation failed'
+          WHEN LOWER(j.last_error) LIKE '%malformed%' THEN 'Malformed model output'
+          WHEN LOWER(j.last_error) LIKE '%fetch%' OR LOWER(j.last_error) LIKE '%extract%' THEN 'Source retrieval failed'
+          ELSE 'Processing error'
+        END AS reason
+      FROM jobs j LEFT JOIN articles a ON a.id = j.article_id
+      WHERE j.state IN ('failed', 'deferred')
+      ORDER BY j.updated_at DESC, j.id DESC LIMIT 10`)
+      .all<{ id: string; kind: JobKind; state: string; articleTitle: string | null; updatedAt: string; reason: string }>(),
+  ]);
+  const jobs = { pending: 0, running: 0, deferred: 0, failed: 0 };
+  for (const row of counts.results ?? []) {
+    if (Object.hasOwn(jobs, row.state)) jobs[row.state as keyof typeof jobs] = row.count;
+  }
+  return {
+    day, jobs,
+    usedNeurons: budget?.used_neurons ?? 0,
+    reservedNeurons: budget?.reserved_neurons ?? 0,
+    recent: recent.results ?? [],
+  };
+}
+
+export type SnapshotStorageCandidate = {
+  snapshotId: string;
+  articleId: string;
+  articleSlug: string;
+  fetchedAt: string;
+  payloadBytes: number;
+};
+
+export type SnapshotStorageReport = {
+  generatedAt: string;
+  cutoff: string;
+  days: number;
+  limit: number;
+  snapshots: { total: number; referenced: number; unreferenced: number; candidates: number };
+  payloadBytes: { total: number; referenced: number; unreferenced: number; candidates: number };
+  sample: SnapshotStorageCandidate[];
+  note: string;
+};
+
+const STORAGE_PAYLOAD_NOTE =
+  "Payload estimates are UTF-8 bytes for article_snapshots.blocks_json only; they are not total D1 database size.";
+
+export async function getSnapshotStorageReport(
+  db: D1Database,
+  options: { days?: number; limit?: number; now?: Date } = {},
+): Promise<SnapshotStorageReport> {
+  const days = Number.isFinite(options.days) ? Math.max(1, Math.trunc(options.days!)) : 30;
+  const limit = Number.isFinite(options.limit) ? Math.min(200, Math.max(1, Math.trunc(options.limit!))) : 20;
+  const now = options.now ?? new Date();
+  const cutoff = new Date(now.getTime() - days * 86_400_000).toISOString();
+
+  const candidateWhere = `
+    julianday(s.fetched_at) IS NOT NULL
+    AND julianday(s.fetched_at) < julianday(?)
+    AND NOT EXISTS (SELECT 1 FROM explanation_revisions r WHERE r.snapshot_id = s.id)
+    AND NOT EXISTS (
+      SELECT 1 FROM jobs j
+      WHERE j.article_id = s.article_id AND j.state IN ('pending', 'running', 'deferred')
+    )
+    AND EXISTS (
+      SELECT 1 FROM article_snapshots newer
+      WHERE newer.article_id = s.article_id
+        AND (
+          julianday(newer.fetched_at) > julianday(s.fetched_at)
+          OR (julianday(newer.fetched_at) = julianday(s.fetched_at) AND newer.id > s.id)
+        )
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM article_snapshots bad
+      WHERE bad.article_id = s.article_id AND julianday(bad.fetched_at) IS NULL
+    )
+  `;
+
+  const [totals, candidateTotals, sample] = await Promise.all([
+    db.prepare(
+      `SELECT
+        COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN EXISTS (
+          SELECT 1 FROM explanation_revisions r WHERE r.snapshot_id = s.id
+        ) THEN 1 ELSE 0 END), 0) AS referenced,
+        COALESCE(SUM(CASE WHEN EXISTS (
+          SELECT 1 FROM explanation_revisions r WHERE r.snapshot_id = s.id
+        ) THEN 0 ELSE 1 END), 0) AS unreferenced,
+        COALESCE(SUM(LENGTH(CAST(s.blocks_json AS BLOB))), 0) AS total_bytes,
+        COALESCE(SUM(CASE WHEN EXISTS (
+          SELECT 1 FROM explanation_revisions r WHERE r.snapshot_id = s.id
+        ) THEN LENGTH(CAST(s.blocks_json AS BLOB)) ELSE 0 END), 0) AS referenced_bytes,
+        COALESCE(SUM(CASE WHEN EXISTS (
+          SELECT 1 FROM explanation_revisions r WHERE r.snapshot_id = s.id
+        ) THEN 0 ELSE LENGTH(CAST(s.blocks_json AS BLOB)) END), 0) AS unreferenced_bytes
+      FROM article_snapshots s`,
+    ).first<{
+      total: number;
+      referenced: number;
+      unreferenced: number;
+      total_bytes: number;
+      referenced_bytes: number;
+      unreferenced_bytes: number;
+    }>(),
+    db.prepare(
+      `SELECT COUNT(*) AS candidates, COALESCE(SUM(LENGTH(CAST(s.blocks_json AS BLOB))), 0) AS candidate_bytes
+       FROM article_snapshots s
+       WHERE ${candidateWhere}`,
+    ).bind(cutoff).first<{ candidates: number; candidate_bytes: number }>(),
+    db.prepare(
+      `SELECT s.id AS snapshotId, s.article_id AS articleId, a.slug AS articleSlug,
+              s.fetched_at AS fetchedAt, LENGTH(CAST(s.blocks_json AS BLOB)) AS payloadBytes
+       FROM article_snapshots s
+       JOIN articles a ON a.id = s.article_id
+       WHERE ${candidateWhere}
+       ORDER BY julianday(s.fetched_at) ASC, s.id ASC
+       LIMIT ?`,
+    ).bind(cutoff, limit).all<SnapshotStorageCandidate>(),
+  ]);
+
+  const total = Number(totals?.total ?? 0);
+  const referenced = Number(totals?.referenced ?? 0);
+  const unreferenced = Number(totals?.unreferenced ?? 0);
+  const candidates = Number(candidateTotals?.candidates ?? 0);
+  return {
+    generatedAt: now.toISOString(),
+    cutoff,
+    days,
+    limit,
+    snapshots: { total, referenced, unreferenced, candidates },
+    payloadBytes: {
+      total: Number(totals?.total_bytes ?? 0),
+      referenced: Number(totals?.referenced_bytes ?? 0),
+      unreferenced: Number(totals?.unreferenced_bytes ?? 0),
+      candidates: Number(candidateTotals?.candidate_bytes ?? 0),
+    },
+    sample: (sample.results ?? []).map((row) => ({
+      snapshotId: row.snapshotId,
+      articleId: row.articleId,
+      articleSlug: row.articleSlug,
+      fetchedAt: row.fetchedAt,
+      payloadBytes: Number(row.payloadBytes),
+    })),
+    note: STORAGE_PAYLOAD_NOTE,
+  };
+}
+
 export async function listReviewQueue(
   db: D1Database,
   limit = 40,

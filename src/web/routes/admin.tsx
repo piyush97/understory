@@ -1,12 +1,13 @@
 import type { Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { AppEnv } from "../../shared/env";
-import { bool } from "../../shared/env";
+import { bool, dailyNeuronBudget } from "../../shared/env";
 import { verifyAccessJwt } from "../../shared/access";
 import { pingIndexNow } from "../../shared/indexnow";
 import {
   approveRevision,
   getRevisionDetail,
+  getPipelineStatus,
   listRecentSkippedArticles,
   listReviewQueue,
   rejectRevision,
@@ -67,10 +68,12 @@ export async function renderAdmin(c: Context<AppEnv>) {
   const auth = await authorize(c);
   if (!auth.ok) return renderLogin(c, auth.missingToken);
 
-  const [queue, skipped] = await Promise.all([
+  const [queue, skipped, pipeline] = await Promise.all([
     listReviewQueue(c.env.DB),
     listRecentSkippedArticles(c.env.DB),
+    getPipelineStatus(c.env.DB).catch(() => null),
   ]);
+  const budget = dailyNeuronBudget(c.env.DAILY_NEURON_BUDGET);
   const site = c.get("site");
   const queued = c.req.query("queued") === "1";
   const rejected = c.req.query("rejected") === "1";
@@ -129,6 +132,46 @@ export async function renderAdmin(c: Context<AppEnv>) {
             <strong>{site.publicationVersion}</strong>
           </div>
         </div>
+
+        <section class="admin-queue admin-pipeline" aria-labelledby="pipeline-title">
+          <div class="section-head">
+            <h2 id="pipeline-title">Pipeline status</h2>
+            {pipeline ? <span class="section-head__meta">{pipeline.day} UTC</span> : null}
+          </div>
+          {pipeline ? (
+            <>
+              <div class="admin-stats">
+                {(["pending", "running", "deferred", "failed"] as const).map((state) => (
+                  <div>
+                    <span class="field-label">{state}</span>
+                    <strong>{pipeline.jobs[state]}</strong>
+                  </div>
+                ))}
+              </div>
+              <p>
+                AI neurons today: {pipeline.usedNeurons.toLocaleString("en-US")} used, {" "}
+                {pipeline.reservedNeurons.toLocaleString("en-US")} reserved, {" "}
+                {Math.max(0, budget - pipeline.usedNeurons - pipeline.reservedNeurons).toLocaleString("en-US")} remaining
+                {" "}of {budget.toLocaleString("en-US")}.
+              </p>
+              {pipeline.recent.length ? (
+                <>
+                  <h3>Recent failed and deferred jobs</h3>
+                  <ul>
+                    {pipeline.recent.map((job) => (
+                      <li>
+                        <strong>{job.articleTitle ?? "Discovery"}</strong>: {job.kind}, {job.state}.
+                        {" "}{job.reason}. <time dateTime={job.updatedAt}>{relativeDate(job.updatedAt)}</time>
+                        {" "}<span class="admin-help__fineprint">Job {job.id}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p class="admin-help__fineprint">Latest 10 problems. Detailed errors remain in private logs.</p>
+                </>
+              ) : <p class="admin-help__fineprint">No failed or deferred jobs.</p>}
+            </>
+          ) : <p>Pipeline status unavailable. Refresh this page to retry; the review queue remains available.</p>}
+        </section>
 
         <section class="admin-queue" aria-labelledby="queue-title">
           <div class="section-head">

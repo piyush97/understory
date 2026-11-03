@@ -6,6 +6,13 @@ import * as dbModule from "../src/infrastructure/db";
 const db = vi.hoisted(() => ({ approveRevision: vi.fn(), listReviewQueue: vi.fn(), listRecentSkippedArticles: vi.fn(async () => []) }));
 vi.mock("../src/infrastructure/db", () => ({
   ...db,
+  getPipelineStatus: vi.fn(async () => ({
+    day: "2026-11-03",
+    jobs: { pending: 0, running: 0, deferred: 0, failed: 0 },
+    usedNeurons: 0,
+    reservedNeurons: 0,
+    recent: [],
+  })),
   getSiteState: vi.fn(async () => ({ publicationVersion: "1" })),
   getPublicationVersion: vi.fn(async () => "1"),
   getRevisionDetail: vi.fn(), rejectRevision: vi.fn(),
