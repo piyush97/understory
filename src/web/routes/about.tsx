@@ -126,7 +126,7 @@ export function renderAbout(c: Context<AppEnv>) {
               <p>
                 The project runs on Cloudflare's free plan and is designed to stay there. The
                 binding constraint is Workers AI: 10,000 neurons per day. Understory reserves
-                8,000 and pauses new generation when the reservation would cross that line.
+                up to 9,000 and pauses new generation when the reservation would cross that line.
                 Reading the site is never blocked by the AI budget.
               </p>
               <div class="budget-table" role="table" aria-label="Free-tier limits">
@@ -153,7 +153,7 @@ export function renderAbout(c: Context<AppEnv>) {
                 <div class="budget-table__row" role="row">
                   <span role="cell">Workers AI</span>
                   <span role="cell">10,000 neurons/day</span>
-                  <span role="cell">8,000 reserved for explainer drafts</span>
+                  <span role="cell">Up to 9,000 reserved for explainer drafts</span>
                 </div>
               </div>
               <p class="about-fineprint">

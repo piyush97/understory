@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, insertArticle, listAllPublished, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, getPipelineStatus, insertArticle, listAllPublished, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
 import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
@@ -9,6 +9,49 @@ async function lease(db: ReturnType<typeof sqliteDb>) {
   await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
   return (await claimJob(db.db, "job", "worker"))!;
 }
+
+describe("pipeline status", () => {
+  it("returns zero counts and an empty budget for a fresh UTC day", async () => {
+    const db = setup();
+    db.sqlite.exec("INSERT INTO ai_budget (day, used_neurons, reserved_neurons) VALUES ('2026-11-03', 7000, 500)");
+    expect(await getPipelineStatus(db.db, new Date("2026-11-03T23:30:00-02:00"))).toEqual({
+      day: "2026-11-04", jobs: { pending: 0, running: 0, deferred: 0, failed: 0 },
+      usedNeurons: 0, reservedNeurons: 0, recent: [],
+    });
+  });
+
+  it("counts real jobs, bounds and orders recent problems, and never returns raw errors", async () => {
+    const db = setup();
+    for (let index = 0; index < 14; index++) {
+      const id = `failed-${String(index).padStart(2, "0")}`;
+      await createJob(db.db, { id, kind: "generate", articleId: "article", idempotencyKey: id });
+    }
+    db.sqlite.exec("UPDATE jobs SET state = 'failed', updated_at = '2026-11-04T01:00:00.000Z', last_error = 'Validation rejected: Bearer secret-token'");
+    for (const state of ["pending", "running", "deferred", "done"]) {
+      await createJob(db.db, { id: state, kind: "extract", articleId: "article", idempotencyKey: state });
+      db.sqlite.prepare("UPDATE jobs SET state = ?, updated_at = '2026-11-04T02:00:00.000Z', last_error = 'budget: private-data' WHERE id = ?")
+        .run(state, state);
+    }
+    db.sqlite.exec("INSERT INTO ai_budget (day, used_neurons, reserved_neurons) VALUES ('2026-11-04', 6000, 500)");
+    const status = await getPipelineStatus(db.db, new Date("2026-11-04T03:00:00.000Z"));
+    expect(status.jobs).toEqual({ pending: 1, running: 1, deferred: 1, failed: 14 });
+    expect(status).toMatchObject({ day: "2026-11-04", usedNeurons: 6000, reservedNeurons: 500 });
+    expect(status.recent).toHaveLength(10);
+    expect(status.recent.slice(0, 3).map((job) => job.id)).toEqual(["deferred", "failed-13", "failed-12"]);
+    expect(status.recent[0]).toMatchObject({ reason: "AI budget exhausted", articleTitle: "Test article" });
+    expect(status.recent[1]?.reason).toBe("Validation failed");
+    expect(JSON.stringify(status)).not.toMatch(/secret-token|private-data|last_error|payload_json/);
+  });
+
+  it("uses a generic safe category for unknown errors", async () => {
+    const db = setup();
+    await createJob(db.db, { id: "unknown", kind: "generate", articleId: "article", idempotencyKey: "unknown" });
+    db.sqlite.exec("UPDATE jobs SET state = 'failed', last_error = 'https://user:password@example.com/?token=hidden'");
+    const status = await getPipelineStatus(db.db);
+    expect(status.recent[0]?.reason).toBe("Processing error");
+    expect(JSON.stringify(status)).not.toMatch(/password|hidden/);
+  });
+});
 
 describe("job leases", () => {
   it("does not claim pending jobs before next_run_at, including deferred retries", async () => {

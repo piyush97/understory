@@ -9,6 +9,7 @@ const db = vi.hoisted(() => ({
   getRevisionDetail: vi.fn(),
   listReviewQueue: vi.fn(),
   listRecentSkippedArticles: vi.fn(async (): Promise<SkippedArticle[]> => []),
+  getPipelineStatus: vi.fn(),
   rejectRevision: vi.fn(),
 }));
 vi.mock("../src/infrastructure/db", () => ({
@@ -23,6 +24,7 @@ const env = {
   ENVIRONMENT: "production",
   SITE_NAME: "Understory",
   SITE_URL: "https://example.com",
+  DAILY_NEURON_BUDGET: "9500",
   DB: {},
   ASSETS: {},
   PIPELINE_QUEUE: {},
@@ -50,6 +52,56 @@ beforeEach(() => {
   vi.clearAllMocks();
   db.listReviewQueue.mockResolvedValue([]);
   db.listRecentSkippedArticles.mockResolvedValue([]);
+  db.getPipelineStatus.mockResolvedValue({
+    day: "2026-11-04", jobs: { pending: 0, running: 0, deferred: 0, failed: 0 },
+    usedNeurons: 0, reservedNeurons: 0, recent: [],
+  });
+});
+
+describe("admin pipeline status", () => {
+  it("shows the effective budget and an honest empty job state", async () => {
+    const { document } = parseHTML(await (await request()).text());
+    const section = document.querySelector('[aria-labelledby="pipeline-title"]');
+    expect(section?.textContent).toContain("2026-11-04 UTC");
+    expect(section?.textContent).toContain("9,000 remaining");
+    expect(section?.textContent).toContain("No failed or deferred jobs.");
+    expect(section?.querySelectorAll("button, a")).toHaveLength(0);
+  });
+
+  it("shows job counts, safe reasons and a clamped remaining budget", async () => {
+    db.getPipelineStatus.mockResolvedValue({
+      day: "2026-11-04", jobs: { pending: 2, running: 1, deferred: 3, failed: 4 },
+      usedNeurons: 8900, reservedNeurons: 500,
+      recent: [{ id: "job-1", kind: "generate", state: "failed", articleTitle: "<img src=x>",
+        reason: "Validation failed", updatedAt: "2026-11-04T00:00:00.000Z" }],
+    });
+    const { document } = parseHTML(await (await request()).text());
+    const section = document.querySelector('[aria-labelledby="pipeline-title"]');
+    expect([...section!.querySelectorAll(".admin-stats strong")].map((node) => node.textContent))
+      .toEqual(["2", "1", "3", "4"]);
+    expect(section?.textContent).toContain("8,900 used");
+    expect(section?.textContent).toContain("500 reserved");
+    expect(section?.textContent).toContain("0 remaining");
+    expect(section?.textContent).toContain("Validation failed");
+    expect(section?.textContent).toContain("<img src=x>");
+    expect(section?.querySelector("img")).toBeNull();
+  });
+
+  it("keeps the review queue usable when telemetry fails, without leaking the error", async () => {
+    db.getPipelineStatus.mockRejectedValue(new Error("secret-token-never-display"));
+    const response = await request();
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Pipeline status unavailable");
+    expect(html).toContain("Review queue");
+    expect(html).not.toContain("secret-token-never-display");
+  });
+
+  it("does not read or show telemetry to an anonymous visitor", async () => {
+    const response = await app.fetch(new Request("https://example.com/admin"), env, {} as ExecutionContext);
+    expect(await response.text()).not.toContain('id="pipeline-title"');
+    expect(db.getPipelineStatus).not.toHaveBeenCalled();
+  });
 });
 
 describe("admin skipped list", () => {

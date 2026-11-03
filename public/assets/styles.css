@@ -2440,6 +2440,11 @@ html:not(.js) .js-only {
   margin-top: 36px;
 }
 
+.admin-pipeline li {
+  overflow-wrap: anywhere;
+  margin-block: 10px;
+}
+
 .admin-table {
   border-top: 1px solid var(--rule);
 }

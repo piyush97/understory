@@ -109,6 +109,12 @@ Before generation, the extract job scores the source on mechanism evidence and c
 
 `npm run selection:audit -- --local|--remote [--json] [--limit <n>]` is read-only by default: it prints the score distribution, lowest and highest 20, and duplicate clusters. Only `--apply` writes, and only `selection_score`, `selection_reason`, and `duplicate_of`. Never `status`, revisions, or content.
 
+`npm run storage:audit -- --local|--remote [--json] [--days <n>] [--limit <n>]` is read-only. It requires exactly one target, defaults to 30 UTC days and a 20-row sample, accepts at most 3,650 days and 200 sample rows, and rejects unknown or write/apply flags before invoking Wrangler. It reports total, referenced, unreferenced, and cleanup-candidate snapshot counts, plus estimated `blocks_json` payload bytes from SQLite UTF-8 blob lengths. Those estimates cover snapshot payload only, not total D1 database size.
+
+Cleanup candidates are strictly older than the UTC cutoff, referenced by no `explanation_revisions` row in any status, not the newest snapshot for their article (timestamp ties break by descending id), and not attached to any article with a pending, running, or deferred job. Missing or malformed snapshot timestamps are never candidates, and an article with one is excluded from the preview entirely. The sample is deterministic, oldest first, and bounded; the aggregate counts and bytes are not affected by the sample limit.
+
+The command has no `--apply` mode, deletion path, or write capability. A later deletion action would need explicit owner approval, a separately reviewed implementation, and a D1 backup/recovery check. This report only previews candidates.
+
 Enforcement and backfill are owner rollout steps, in this order:
 
 1. Shadow: apply the migration, deploy both Workers with `SELECTION_ENFORCE="false"`. New posts get scores; nothing is skipped.
@@ -118,12 +124,12 @@ Enforcement and backfill are owner rollout steps, in this order:
 
 Existing published sheets stay as they are. Any noindex, unpublish, or regeneration is a separate owner decision.
 
-The daily budget defaults to 8,000 neurons, with roughly 500 neurons reserved per attempt. The pipeline stops before exceeding the budget and defers jobs to the next UTC day. Set `DAILY_NEURON_BUDGET="0"` to pause generation entirely without breaking reading.
+The daily budget defaults to 8,000 neurons; both production Workers configure 9,000, the shared hard cap, with roughly 500 neurons reserved per attempt. The pipeline stops before exceeding the reservation budget and defers jobs to the next UTC day. Set `DAILY_NEURON_BUDGET="0"` to pause generation entirely without breaking reading. The authenticated editorial desk shows pending, running, deferred and failed job counts, the latest 10 failed/deferred jobs with safe error categories, and today's UTC used, reserved and remaining neurons. Telemetry errors do not block editorial review; raw errors and job payloads are never displayed.
 
 ## Content and editorial rules
 
 - The seed contains ten published explainers based on real engineering blog posts, plus three discovered posts on the bench. The prose was written for Understory, not copied from the publishers. Live editorial approvals may increase the published count independently of these fixtures.
-- Public seed snapshots contain two or three short quotations and the canonical link per source. Runtime extraction stores a larger, bounded private snapshot for generation/review; it is not served through public routes. No automatic retention/deletion policy is implemented, so operators must manage that storage separately.
+- Public seed snapshots contain two or three short quotations and the canonical link per source. Runtime extraction stores a larger, bounded private snapshot for generation/review; it is not served through public routes. No automatic retention/deletion policy is implemented. Use the read-only `storage:audit` report to preview safe cleanup candidates; deletion remains manual and separately approved.
 - Generated content must cite source ids. Citations that point nowhere are rejected before review.
 - Sources can only use URLs found in the extracted page or the original canonical URL. The validator rejects invented URLs.
 - Diagrams are graph JSON rendered to deterministic SVG. The model never supplies SVG or JavaScript.
@@ -224,7 +230,7 @@ enabled hostname, not just the custom domain.
 ## Free-tier notes
 
 - Workers: 100,000 requests/day, 10 ms CPU per invocation on the free plan.
-- Workers AI: 10,000 neurons/day; Understory reserves 8,000 and leaves headroom.
+- Workers AI: 10,000 neurons/day; Understory's production budget is capped at 9,000 and leaves headroom.
 - D1: 5 million rows read/day, 100,000 rows written/day, 500 MB per database.
 - Queues: 10,000 operations/day, 24-hour retention.
 - Discovery HTML is capped before parsing, snapshots are bounded, and pages are cached in the Cache API keyed by publication version.
