@@ -105,7 +105,7 @@ npx playwright install chromium
 4. With `AUTO_PUBLISH="true"` (enabled in the production pipeline config), a newly generated valid revision publishes in the same transaction that creates it, with an automated-validation audit record. Existing drafts are never auto-approved. Set `AUTO_PUBLISH="false"` and redeploy the pipeline to hold new drafts for manual review. Publication updates the article and increments the publication version; failed validation stays unpublished.
 5. Public pages read only published revisions. A reader request never calls a model.
 
-Before generation, the extract job scores the source on mechanism evidence and checks for near-duplicate stories from the same publisher (14-day window, earliest story survives). With `SELECTION_ENFORCE="true"`, low-scoring or duplicate posts are recorded as skipped and never reach the model. `SELECTION_ENFORCE` stays `"false"` in the checked-in config until the production audit is reviewed. Nothing is unpublished, hidden, or rewritten automatically.
+Before generation, the extract job scores the source on mechanism evidence and checks for near-duplicate stories from the same publisher (14-day window, earliest story survives). With `SELECTION_ENFORCE="true"`, low-scoring or duplicate posts are recorded as skipped and never reach the model. The checked-in pipeline config enables enforcement after a reviewed read-only audit of the latest 500 articles on 2026-11-03 (377 scored, 37 low-score and 2 duplicate candidates; false multipart/vendor clusters removed). This was not a full-corpus or human fact-check. Deploying the pipeline is still required to activate the setting in production. Nothing is unpublished, hidden, or rewritten automatically.
 
 `npm run selection:audit -- --local|--remote [--json] [--limit <n>]` is read-only by default: it prints the score distribution, lowest and highest 20, and duplicate clusters. Only `--apply` writes, and only `selection_score`, `selection_reason`, and `duplicate_of`. Never `status`, revisions, or content.
 
@@ -119,7 +119,7 @@ Enforcement and backfill are owner rollout steps, in this order:
 
 1. Shadow: apply the migration, deploy both Workers with `SELECTION_ENFORCE="false"`. New posts get scores; nothing is skipped.
 2. Read-only audit: `npm run selection:audit -- --remote --json`. Review lowest, highest, and clusters before changing weights.
-3. Enforce: set `SELECTION_ENFORCE` to `"true"` in `wrangler.pipeline.jsonc` and deploy the pipeline.
+3. Enforce: `SELECTION_ENFORCE` is now `"true"` in the checked-in `wrangler.pipeline.jsonc`, based on the reviewed 2026-11-03 audit of the latest 500 articles (377 scored, 37 low-score and 2 duplicate candidates; duplicate-matcher false positives removed). This sample is not a full-corpus or human fact-check. Deploy the pipeline to activate it in production.
 4. Backfill: `npm run selection:audit -- --remote --apply`.
 
 Existing published sheets stay as they are. Any noindex, unpublish, or regeneration is a separate owner decision.
