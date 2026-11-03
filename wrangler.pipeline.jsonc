@@ -42,7 +42,7 @@
     "AI_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
     "DAILY_NEURON_BUDGET": "9000",
     "AUTO_PUBLISH": "true",
-    "SELECTION_ENFORCE": "false",
+    "SELECTION_ENFORCE": "true",
     "DISCOVERY_URL": "https://engineeringblogs.xyz/",
     "OPML_URL": "https://engineeringblogs.xyz/engblogs.opml"
   },

@@ -224,6 +224,48 @@ export function normalizeTitle(title: string): string[] {
     .filter((token) => !/^v?\d+(?:\.\d+)*$/.test(token));
 }
 
+const INSTALMENT_PATTERN =
+  /\b(part|episode|chapter|lesson|installment|instalment|pt|volume|vol)\b[\s.:#-]*(\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten)\b/gi;
+
+function instalmentMarkers(title: string): string[] {
+  return [...title.matchAll(INSTALMENT_PATTERN)]
+    .map((match) => `${(match[1] ?? "").toLowerCase()}:${(match[2] ?? "").toLowerCase()}`)
+    .sort();
+}
+
+function hasDistinctInstalments(a: string, b: string): boolean {
+  const left = instalmentMarkers(a);
+  const right = instalmentMarkers(b);
+  return left.length > 0 && right.length > 0 && left.join("|") !== right.join("|");
+}
+
+function capitalizedTitleTokens(title: string): Set<string> {
+  const tokens = title.match(/[A-Za-z][A-Za-z0-9]*/g) ?? [];
+  return new Set(
+    tokens
+      .filter((token) => token.charAt(0) === token.charAt(0).toUpperCase())
+      .map((token) => token.toLowerCase()),
+  );
+}
+
+function hasDistinctQualifiers(
+  left: Set<string>,
+  right: Set<string>,
+  leftTitle: string,
+  rightTitle: string,
+): boolean {
+  const leftUnique = [...left].filter((token) => !right.has(token));
+  const rightUnique = [...right].filter((token) => !left.has(token));
+  if (leftUnique.length === 0 || rightUnique.length === 0) return false;
+
+  const leftCapitalized = capitalizedTitleTokens(leftTitle);
+  const rightCapitalized = capitalizedTitleTokens(rightTitle);
+  return (
+    leftUnique.some((token) => leftCapitalized.has(token)) &&
+    rightUnique.some((token) => rightCapitalized.has(token))
+  );
+}
+
 export function isNearDuplicate(a: string, b: string): boolean {
   const left = new Set(normalizeTitle(a));
   const right = new Set(normalizeTitle(b));
@@ -234,9 +276,13 @@ export function isNearDuplicate(a: string, b: string): boolean {
     if (right.has(token)) shared += 1;
   }
 
-  if (shared >= 3 && shared / Math.min(left.size, right.size) >= 0.8) return true;
-  if (shared >= 4 && shared / (left.size + right.size - shared) >= 0.6) return true;
-  return false;
+  const overlaps =
+    (shared >= 3 && shared / Math.min(left.size, right.size) >= 0.8) ||
+    (shared >= 4 && shared / (left.size + right.size - shared) >= 0.6);
+  if (!overlaps) return false;
+  if (hasDistinctInstalments(a, b)) return false;
+  if (hasDistinctQualifiers(left, right, a, b)) return false;
+  return true;
 }
 
 export type DuplicateCandidate = {
