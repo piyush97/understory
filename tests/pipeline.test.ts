@@ -104,12 +104,13 @@ function existingRevision(status: string) {
 }
 
 describe("selection gate", () => {
-  it("defaults the pipeline config to shadow mode", () => {
-    const config = JSON.parse(readFileSync(new URL("../wrangler.pipeline.jsonc", import.meta.url), "utf8"));
-    expect(config.vars.SELECTION_ENFORCE).toBe("false");
-  });
+  const config = JSON.parse(readFileSync(new URL("../wrangler.pipeline.jsonc", import.meta.url), "utf8"));
 
-  it.each(["true", "1"])("skips a release note without a generate job when enforcement is %s", async (enforce) => {
+  it.each([
+    { label: "true", enforce: "true" },
+    { label: "1", enforce: "1" },
+    { label: "checked-in production configuration", enforce: config.vars.SELECTION_ENFORCE },
+  ])("skips a release note without a generate job when enforcement is $label", async ({ enforce }) => {
     env.SELECTION_ENFORCE = enforce;
     await extractJob("Widget v2 is now available", "https://example.com/releases/widget-v2", 350, [
       { kind: "paragraph", text: `We are excited. Seamless integration. ${textWords(350)}` },
