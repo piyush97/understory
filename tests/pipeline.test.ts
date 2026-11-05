@@ -310,6 +310,39 @@ describe("selection gate", () => {
     expect(mocks.generate).toHaveBeenCalledTimes(2);
   });
 
+  it("does not spend a repair attempt on token-limited output", async () => {
+    await generateJob();
+    mocks.generate.mockResolvedValue({
+      ok: false, explanation: null, issues: [{ path: "(root)", message: "Model output hit the token limit" }],
+      rawText: '{"contextHeadline": "cut', usage: { inputTokens: 100, outputTokens: 50 },
+      retryable: true, truncated: true,
+    });
+
+    const result = await processJob(env, "job");
+
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+    expect(result.deferred).toBe(true);
+    expect(store.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()).toEqual({ state: "pending" });
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("generating");
+  });
+
+  it("gives up after the second job attempt on retryable output", async () => {
+    await generateJob();
+    store.sqlite.prepare("UPDATE jobs SET attempts = 1").run();
+    mocks.generate.mockResolvedValue({
+      ok: false, explanation: null, issues: [{ path: "(root)", message: "Model output hit the token limit" }],
+      rawText: '{"contextHeadline": "cut', usage: { inputTokens: 100, outputTokens: 50 },
+      retryable: true, truncated: true,
+    });
+
+    const result = await processJob(env, "job");
+
+    expect(store.sqlite.prepare("SELECT state, attempts FROM jobs WHERE id = 'job'").get()).toEqual({ state: "failed", attempts: 2 });
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("failed");
+    expect(result.ok).toBe(false);
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+  });
+
   it("requeues a skipped duplicate when extraction fails on the third attempt", async () => {
     skippedDuplicate();
     await createJob(store.db, { id: "job", kind: "extract", articleId: "article", idempotencyKey: "extract:article" });

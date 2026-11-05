@@ -18,6 +18,8 @@ export type GenerationAttempt = {
   usage: { inputTokens: number | null; outputTokens: number | null } | null;
   /** Malformed or empty output is sampling noise; a later fresh attempt can succeed. */
   retryable?: boolean;
+  /** The output hit the token limit: re-prompting with the same max_tokens cannot fix it. */
+  truncated?: boolean;
 };
 
 export async function attemptGeneration(
@@ -46,6 +48,7 @@ export async function attemptGeneration(
 
   const output = readModelOutput(response);
   const rawText = output.text;
+  const truncated = output.finishReason === "length";
   if (rawText.trim().length === 0) {
     return {
       ok: false,
@@ -54,6 +57,7 @@ export async function attemptGeneration(
       rawText,
       usage: toTokenUsage(output.usage),
       retryable: true,
+      truncated,
     };
   }
 
@@ -69,6 +73,7 @@ export async function attemptGeneration(
       rawText,
       usage: toTokenUsage(output.usage),
       retryable: true,
+      truncated,
     };
   }
 
@@ -80,6 +85,7 @@ export async function attemptGeneration(
       issues: withFinishIssue(validation.issues, output.finishReason),
       rawText,
       usage: toTokenUsage(output.usage),
+      truncated,
     };
   }
 
@@ -91,6 +97,7 @@ export async function attemptGeneration(
       issues: semanticIssues,
       rawText,
       usage: toTokenUsage(output.usage),
+      truncated,
     };
   }
 
