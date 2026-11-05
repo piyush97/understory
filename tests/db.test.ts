@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, getPipelineStatus, insertArticle, listAllPublished, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getAdjacentArticles, getFeedLead, getPipelineStatus, insertArticle, listAllPublished, listFeedPage, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
 import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
@@ -768,5 +768,63 @@ describe("discovery listings", () => {
     expect(content.map((row) => row.slug)).toContain("pub");
     expect(content.map((row) => row.slug)).not.toContain("skip");
     expect(JSON.parse(content.find((row) => row.slug === "pub")!.content).contextHeadline).toBeTruthy();
+  });
+});
+
+describe("feed query plans", () => {
+  function capturePrepare(db: ReturnType<typeof sqliteDb>): string[] {
+    const seen: string[] = [];
+    const real = (db.db as { prepare: (sql: string) => unknown }).prepare;
+    (db.db as { prepare: (sql: string) => unknown }).prepare = (sql: string) => {
+      seen.push(sql);
+      return real.call(db.db, sql);
+    };
+    return seen;
+  }
+
+  function queryPlan(db: ReturnType<typeof sqliteDb>, sql: string): string {
+    const placeholders = (sql.match(/\?/g) ?? []).length;
+    const rows = db.sqlite
+      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .all(...Array(placeholders).fill("x")) as Array<{ detail: string }>;
+    return rows.map((row) => row.detail).join(" | ");
+  }
+
+  it("range-seeks on (published_at, id) for cursor pages and adjacent lookups", async () => {
+    const db = setup();
+    const seen = capturePrepare(db);
+
+    await listFeedPage(db.db, { cursor: { publishedAt: "2026-11-02T00:00:00.000Z", id: "p2" }, limit: 5 });
+    await getAdjacentArticles(db.db, "2026-11-02T00:00:00.000Z", "p2");
+
+    const keyset = seen.filter((sql) => /\(a\.published_at\b/.test(sql));
+    expect(keyset).toHaveLength(3);
+    for (const statement of keyset) {
+      expect(queryPlan(db, statement)).toMatch(/published_at,id/);
+    }
+  });
+
+  it("pages the feed and finds neighbors across a timestamp tie", async () => {
+    const db = setup();
+    seedPublished(db, { id: "p0", publishedAt: "2026-11-01T00:00:00.000Z" });
+    seedPublished(db, { id: "p1", publishedAt: "2026-11-01T00:00:00.000Z" });
+    seedPublished(db, { id: "p2", publishedAt: "2026-11-02T00:00:00.000Z" });
+    seedPublished(db, { id: "p3", publishedAt: "2026-11-03T00:00:00.000Z" });
+    seedPublished(db, { id: "p4", publishedAt: "2026-11-04T00:00:00.000Z" });
+
+    const first = await listFeedPage(db.db, { limit: 3 });
+    expect(first.items.map((article) => article.id)).toEqual(["p4", "p3", "p2"]);
+    expect(first.hasMore).toBe(true);
+
+    const second = await listFeedPage(db.db, {
+      cursor: { publishedAt: "2026-11-02T00:00:00.000Z", id: "p2" },
+      limit: 3,
+    });
+    expect(second.items.map((article) => article.id)).toEqual(["p1", "p0"]);
+    expect(second.hasMore).toBe(false);
+
+    const { newer, older } = await getAdjacentArticles(db.db, "2026-11-02T00:00:00.000Z", "p2");
+    expect(newer?.id).toBe("p3");
+    expect(older?.id).toBe("p1");
   });
 });

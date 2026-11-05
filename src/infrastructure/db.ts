@@ -146,8 +146,10 @@ export async function listFeedPage(
   }
 
   if (options.cursor) {
-    where.push("(a.published_at < ? OR (a.published_at = ? AND a.id < ?))");
-    bindings.push(options.cursor.publishedAt, options.cursor.publishedAt, options.cursor.id);
+    // Composite range predicate: SQLite can seek the (published_at, id) index
+    // instead of walking every newer row (verified with EXPLAIN QUERY PLAN).
+    where.push("(a.published_at, a.id) < (?, ?)");
+    bindings.push(options.cursor.publishedAt, options.cursor.id);
   }
 
   bindings.push(limit + 1);
@@ -313,21 +315,21 @@ export async function getAdjacentArticles(
       .prepare(
         `${ARTICLE_SELECT}
          WHERE a.status = 'published'
-           AND (a.published_at > ? OR (a.published_at = ? AND a.id > ?))
+           AND (a.published_at, a.id) > (?, ?)
          ORDER BY a.published_at ASC, a.id ASC
          LIMIT 1`,
       )
-      .bind(publishedAt, publishedAt, articleId)
+      .bind(publishedAt, articleId)
       .first<ArticleSourceRow>(),
     db
       .prepare(
         `${ARTICLE_SELECT}
          WHERE a.status = 'published'
-           AND (a.published_at < ? OR (a.published_at = ? AND a.id < ?))
+           AND (a.published_at, a.id) < (?, ?)
          ORDER BY a.published_at DESC, a.id DESC
          LIMIT 1`,
       )
-      .bind(publishedAt, publishedAt, articleId)
+      .bind(publishedAt, articleId)
       .first<ArticleSourceRow>(),
   ]);
 
