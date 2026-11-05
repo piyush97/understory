@@ -17,7 +17,9 @@ async function publicationVersion(c: Context<AppEnv>): Promise<string> {
 async function loadSite(c: Context<AppEnv>, enabled: boolean): Promise<void> {
   if (!enabled || c.get("site")) return;
   try {
-    c.set("site", await getSiteState(c.env.DB));
+    // 30s of count staleness is invisible to readers and keeps scanner traffic
+    // (404s, junk filters) from re-running the COUNT scans on every request.
+    c.set("site", await getSiteState(c.env.DB, { maxAgeMs: 30_000 }));
   } catch {
     c.set("site", { published: 0, sources: 0, topics: 0, inReview: 0, publicationVersion: "0" });
   }

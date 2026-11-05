@@ -877,7 +877,19 @@ export type SiteState = {
   publicationVersion: string;
 };
 
-export async function getSiteState(db: D1Database): Promise<SiteState> {
+// Resolved values only, keyed by database handle: Workers must not share
+// in-flight I/O promises across requests, and tests use fresh handles.
+const siteStateMemo = new WeakMap<D1Database, { value: SiteState; at: number }>();
+
+export async function getSiteState(
+  db: D1Database,
+  options: { maxAgeMs?: number } = {},
+): Promise<SiteState> {
+  const { maxAgeMs } = options;
+  if (maxAgeMs !== undefined) {
+    const memo = siteStateMemo.get(db);
+    if (memo && Date.now() - memo.at < maxAgeMs) return memo.value;
+  }
   const row = await db
     .prepare(
       `SELECT
@@ -895,13 +907,15 @@ export async function getSiteState(db: D1Database): Promise<SiteState> {
       publication_version: string | null;
     }>();
 
-  return {
+  const state: SiteState = {
     published: row?.published ?? 0,
     sources: row?.sources ?? 0,
     topics: row?.topics ?? 0,
     inReview: row?.in_review ?? 0,
     publicationVersion: row?.publication_version ?? "0",
   };
+  if (maxAgeMs !== undefined) siteStateMemo.set(db, { value: state, at: Date.now() });
+  return state;
 }
 
 export async function listAllPublished(

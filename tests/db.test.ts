@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getAdjacentArticles, getFeedLead, getPipelineStatus, insertArticle, listAllPublished, listFeedPage, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getAdjacentArticles, getFeedLead, getPipelineStatus, getSiteState, insertArticle, listAllPublished, listFeedPage, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
 import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
@@ -8,6 +8,24 @@ afterEach(() => { vi.useRealTimers(); for (const db of databases.splice(0)) db.s
 async function lease(db: ReturnType<typeof sqliteDb>) {
   await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
   return (await claimJob(db.db, "job", "worker"))!;
+}
+
+function capturePrepare(db: ReturnType<typeof sqliteDb>): string[] {
+  const seen: string[] = [];
+  const real = (db.db as { prepare: (sql: string) => unknown }).prepare;
+  (db.db as { prepare: (sql: string) => unknown }).prepare = (sql: string) => {
+    seen.push(sql);
+    return real.call(db.db, sql);
+  };
+  return seen;
+}
+
+function queryPlan(db: ReturnType<typeof sqliteDb>, sql: string): string {
+  const placeholders = (sql.match(/\?/g) ?? []).length;
+  const rows = db.sqlite
+    .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+    .all(...Array(placeholders).fill("x")) as Array<{ detail: string }>;
+  return rows.map((row) => row.detail).join(" | ");
 }
 
 describe("pipeline status", () => {
@@ -771,25 +789,54 @@ describe("discovery listings", () => {
   });
 });
 
+describe("site state reads", () => {
+  const countQueries = (seen: string[]) => seen.filter((sql) => sql.includes("COUNT(*) FROM articles"));
+
+  it("memoizes site state only when maxAgeMs is requested", async () => {
+    const db = setup();
+    const seen = capturePrepare(db);
+
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    expect(countQueries(seen)).toHaveLength(1);
+
+    // Callers that need fresh counts (the admin desk) must not opt in.
+    await getSiteState(db.db);
+    await getSiteState(db.db);
+    expect(countQueries(seen)).toHaveLength(3);
+  });
+
+  it("refetches once maxAgeMs has elapsed", async () => {
+    const db = setup();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-05T00:00:00.000Z"));
+    const seen = capturePrepare(db);
+
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    vi.setSystemTime(new Date("2026-11-05T00:00:20.000Z"));
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    expect(countQueries(seen)).toHaveLength(1);
+
+    vi.setSystemTime(new Date("2026-11-05T00:01:01.000Z"));
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    expect(countQueries(seen)).toHaveLength(2);
+  });
+
+  it("keeps memos separate per database handle", async () => {
+    const first = setup();
+    const second = setup();
+    const seenFirst = capturePrepare(first);
+    const seenSecond = capturePrepare(second);
+
+    await getSiteState(first.db, { maxAgeMs: 30_000 });
+    await getSiteState(second.db, { maxAgeMs: 30_000 });
+
+    expect(countQueries(seenFirst)).toHaveLength(1);
+    expect(countQueries(seenSecond)).toHaveLength(1);
+  });
+});
+
 describe("feed query plans", () => {
-  function capturePrepare(db: ReturnType<typeof sqliteDb>): string[] {
-    const seen: string[] = [];
-    const real = (db.db as { prepare: (sql: string) => unknown }).prepare;
-    (db.db as { prepare: (sql: string) => unknown }).prepare = (sql: string) => {
-      seen.push(sql);
-      return real.call(db.db, sql);
-    };
-    return seen;
-  }
-
-  function queryPlan(db: ReturnType<typeof sqliteDb>, sql: string): string {
-    const placeholders = (sql.match(/\?/g) ?? []).length;
-    const rows = db.sqlite
-      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
-      .all(...Array(placeholders).fill("x")) as Array<{ detail: string }>;
-    return rows.map((row) => row.detail).join(" | ");
-  }
-
   it("range-seeks on (published_at, id) for cursor pages and adjacent lookups", async () => {
     const db = setup();
     const seen = capturePrepare(db);
