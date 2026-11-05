@@ -884,6 +884,57 @@ describe("job attempts cap", () => {
     expect(job?.attempts).toBe(5);
     expect(job?.state).toBe("running");
   });
+
+  it("retires an exhausted article and recovers its skipped duplicates", async () => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+    db.sqlite.exec(`INSERT INTO articles
+      (id, source_id, canonical_url, original_title, published_at, discovered_at, slug, status, duplicate_of)
+      VALUES ('dup', 'source', 'https://example.com/dup', 'Duplicate', '2026-11-01', '2026-11-01', 'dup', 'skipped', 'article')`);
+
+    await failExhaustedAttempts(db.db);
+
+    expect(db.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("failed");
+    expect(db.sqlite.prepare("SELECT status, duplicate_of FROM articles WHERE id = 'dup'").get())
+      .toEqual({ status: "discovered", duplicate_of: null });
+    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE article_id = 'dup'").get()?.state).toBe("pending");
+  });
+
+  it.each(["live lease", "draft", "published", "other job"])("preserves an article with %s", async (protection) => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+    if (protection === "live lease") db.sqlite.exec("UPDATE jobs SET lease_expires_at = '2099-01-01T00:00:00.000Z'");
+    if (protection === "draft") {
+      seedRevision(db);
+      db.sqlite.exec("UPDATE articles SET status = 'review'");
+    }
+    if (protection === "published") {
+      seedRevision(db, "published");
+      db.sqlite.exec("UPDATE articles SET status = 'published', published_revision_id = 'revision'");
+    }
+    if (protection === "other job") {
+      await createJob(db.db, { id: "other", kind: "generate", articleId: "article", idempotencyKey: "other" });
+    }
+    const before = db.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get();
+
+    await failExhaustedAttempts(db.db);
+
+    expect(db.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()).toEqual(before);
+    if (protection === "live lease") {
+      expect(db.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()?.state).toBe("running");
+    }
+  });
+
+  it("rolls back job retirement when the article update fails", async () => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+    db.failOn("UPDATE articles");
+
+    await expect(failExhaustedAttempts(db.db)).rejects.toThrow("injected write failure");
+
+    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()?.state).toBe("running");
+    expect(db.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("generating");
+  });
 });
 
 describe("ai budget reconciliation", () => {
@@ -900,13 +951,15 @@ describe("ai budget reconciliation", () => {
       .get(day);
   }
 
-  it("clears stale reservations when no generate job is live", async () => {
+  it("charges orphaned reservations once when no generate job is running", async () => {
     const db = setup();
     const day = seedBudget(db, 1500, 4000);
 
     await reconcileStaleBudgetReservations(db.db);
 
-    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 4000 });
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 5500 });
+    await reconcileStaleBudgetReservations(db.db);
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 5500 });
   });
 
   it("keeps the reservation of a live generate job", async () => {
@@ -920,7 +973,7 @@ describe("ai budget reconciliation", () => {
     expect(readBudget(db, day)).toEqual({ reserved_neurons: 500, used_neurons: 0 });
   });
 
-  it("clears the hold once the holding job's lease expires", async () => {
+  it("keeps an expired running job's hold until the job is retired", async () => {
     const db = setup();
     const day = seedBudget(db, 500);
     await createJob(db.db, { id: "gen", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
@@ -929,7 +982,7 @@ describe("ai budget reconciliation", () => {
 
     await reconcileStaleBudgetReservations(db.db);
 
-    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 0 });
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 500, used_neurons: 0 });
   });
 
   it("ignores live non-generate jobs when deciding holds are stale", async () => {
@@ -940,7 +993,26 @@ describe("ai budget reconciliation", () => {
 
     await reconcileStaleBudgetReservations(db.db);
 
-    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 0 });
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 500 });
+  });
+
+  it("does not erase a reservation admitted while cleanup is starting", async () => {
+    const db = setup();
+    const day = seedBudget(db, 500, 1000);
+    await createJob(db.db, { id: "gen", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    const prepare = db.db.prepare.bind(db.db);
+    db.db.prepare = (sql: string) => {
+      if (/UPDATE ai_budget/.test(sql)) {
+        db.sqlite.exec(`UPDATE jobs SET state = 'running', lease_token = 'concurrent-worker',
+          lease_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = 'gen';
+          UPDATE ai_budget SET reserved_neurons = reserved_neurons + 500;`);
+      }
+      return prepare(sql);
+    };
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 1000, used_neurons: 1000 });
   });
 });
 
@@ -981,5 +1053,13 @@ describe("feed query plans", () => {
     const { newer, older } = await getAdjacentArticles(db.db, "2026-11-02T00:00:00.000Z", "p2");
     expect(newer?.id).toBe("p3");
     expect(older?.id).toBe("p1");
+
+    const tiedPage = await listFeedPage(db.db, {
+      cursor: { publishedAt: "2026-11-01T00:00:00.000Z", id: "p1" }, limit: 3,
+    });
+    expect(tiedPage.items.map((article) => article.id)).toEqual(["p0"]);
+    const tiedNeighbors = await getAdjacentArticles(db.db, "2026-11-01T00:00:00.000Z", "p1");
+    expect(tiedNeighbors.newer?.id).toBe("p2");
+    expect(tiedNeighbors.older?.id).toBe("p0");
   });
 });

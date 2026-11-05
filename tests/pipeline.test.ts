@@ -696,6 +696,19 @@ describe("pipeline consistency", () => {
     await runScheduled(env, now);
     expect((env.PIPELINE_QUEUE.send as ReturnType<typeof vi.fn>).mock.calls).not.toContainEqual([{ kind: "discover", reason: "cron" }]);
   });
+  it("retires killed jobs and charges their orphaned budget during the scheduled sweep", async () => {
+    await generateJob();
+    store.sqlite.exec("UPDATE jobs SET state = 'running', attempts = 5, lease_expires_at = '2000-01-01'");
+    store.sqlite.prepare("INSERT INTO ai_budget (day, reserved_neurons, used_neurons) VALUES (?, 500, 1000)")
+      .run(new Date().toISOString().slice(0, 10));
+
+    await runScheduled(env);
+
+    expect(store.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()?.state).toBe("failed");
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("failed");
+    expect(store.sqlite.prepare("SELECT used_neurons, reserved_neurons FROM ai_budget").get())
+      .toEqual({ used_neurons: 1500, reserved_neurons: 0 });
+  });
   it("retires a rejected generation instead of retrying the whole job", async () => {
     await generateJob();
     mocks.generate.mockResolvedValue({ ok: false, explanation: null, issues: [{ path: "headline", message: "too long" }], rawText: "{}", usage: { inputTokens: 9000, outputTokens: 4000 } });

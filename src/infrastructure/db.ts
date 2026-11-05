@@ -1440,23 +1440,34 @@ export async function listReadyJobs(db: D1Database, limit = 10): Promise<Job[]> 
 /**
  * Terminal-fail jobs that already used every allowed attempt. A Worker killed
  * mid-invocation (CPU or memory limit) never reaches failJob, so without this
- * sweep its expired lease would be reclaimed forever and its AI budget
- * reservation would never be released. Matches failJob's attempts >= 5 rule.
+ * sweep its expired lease would be reclaimed forever. Retire unreviewed
+ * articles in the same transaction, then recover suppressed duplicates.
  */
 export async function failExhaustedAttempts(db: D1Database): Promise<void> {
   const now = new Date().toISOString();
-  await db
-    .prepare(
+  const results = await db.batch<{ article_id: string | null }>([
+    db.prepare(
       `UPDATE jobs
         SET state = 'failed', last_error = COALESCE(last_error, 'Attempts exhausted'),
             lease_token = NULL, lease_expires_at = NULL, updated_at = ?
         WHERE attempts >= 5
           AND ((state = 'pending')
             OR (state = 'running' AND lease_expires_at IS NOT NULL
-                AND lease_expires_at <= MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))))`,
+                AND lease_expires_at <= MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))))
+        RETURNING article_id`,
     )
-    .bind(now, now)
-    .run();
+    .bind(now, now),
+    db.prepare(`UPDATE articles SET status = 'failed', last_error = 'Attempts exhausted', updated_at = ?
+      WHERE status IN ('discovered', 'extracting', 'generating') AND published_revision_id IS NULL
+        AND EXISTS (SELECT 1 FROM jobs WHERE article_id = articles.id
+          AND state = 'failed' AND attempts >= 5 AND updated_at = ?)
+        AND NOT EXISTS (SELECT 1 FROM jobs WHERE article_id = articles.id
+          AND state IN ('pending', 'running', 'deferred'))
+        AND NOT EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id
+          AND status IN ('draft', 'published'))`).bind(now, now),
+  ]);
+  const articles = new Set((results[0]?.results ?? []).map((row) => row.article_id));
+  for (const articleId of articles) if (articleId) await requeueDuplicates(db, articleId);
 }
 
 export async function claimJob(
@@ -1642,37 +1653,22 @@ export async function releaseBudgetReservation(
 }
 
 /**
- * Release AI budget reservations left behind by killed invocations.
- *
- * Invariant: a reservation exists only while its job is live. reserveBudget
- * runs under a live lease, and recordBudgetUsage/releaseBudgetReservation
- * clear the hold before the job completes. So when no generate job holds an
- * unexpired lease, every remaining reserved neuron on today's row is stale
- * (an invocation died between reserve and record). D1 serializes statements,
- * so a concurrent reserve either lands before our live check (job visible) or
- * after the zeroing (its own hold survives); the worst case is one extra
- * 500-neuron admission, never corrupted usage accounting.
+ * Charge orphaned holds at their reserved estimate: inference may already
+ * have been billed. Never refund unknown usage. Check ownership in the UPDATE
+ * itself so a concurrent claim/reservation cannot be erased. Even an expired
+ * running job may still return usage; wait for it to finish or be retired.
  */
 export async function reconcileStaleBudgetReservations(
   db: D1Database,
   now = new Date(),
 ): Promise<void> {
-  const live = await db
-    .prepare(
-      `SELECT 1 FROM jobs
-        WHERE kind = 'generate' AND state = 'running' AND lease_expires_at IS NOT NULL
-          AND lease_expires_at > MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        LIMIT 1`,
-    )
-    .bind(now.toISOString())
-    .first();
-  if (live) return;
-
   await db
     .prepare(
       `UPDATE ai_budget
-        SET reserved_neurons = 0, updated_at = ?
-        WHERE day = ? AND reserved_neurons > 0`,
+        SET used_neurons = used_neurons + reserved_neurons,
+            reserved_neurons = 0, updated_at = ?
+        WHERE day = ? AND reserved_neurons > 0
+          AND NOT EXISTS (SELECT 1 FROM jobs WHERE kind = 'generate' AND state = 'running')`,
     )
     .bind(now.toISOString(), now.toISOString().slice(0, 10))
     .run();
