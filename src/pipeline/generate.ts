@@ -86,6 +86,7 @@ export async function attemptGeneration(
       rawText,
       usage: toTokenUsage(output.usage),
       truncated,
+      retryable: truncated,
     };
   }
 
@@ -98,6 +99,7 @@ export async function attemptGeneration(
       rawText,
       usage: toTokenUsage(output.usage),
       truncated,
+      retryable: truncated,
     };
   }
 
