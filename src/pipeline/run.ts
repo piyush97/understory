@@ -20,6 +20,7 @@ import {
   completeJob,
   createJob,
   deferJob,
+  failExhaustedAttempts,
   failJob,
   findArticleBySlug,
   findArticlesByUrls,
@@ -33,6 +34,7 @@ import {
   listReadyJobs,
   listRecentSourceArticles,
   recordBudgetUsage,
+  reconcileStaleBudgetReservations,
   releaseBudgetReservation,
   reserveBudget,
   renewJobLease,
@@ -526,7 +528,10 @@ export async function runScheduled(env: Bindings, now = new Date()): Promise<voi
   }
 
   // Queue messages make each heavy step its own invocation. Duplicate messages
-  // are harmless because claimJob is atomic.
+  // are harmless because claimJob is atomic. The sweep also terminal-fails
+  // jobs killed mid-invocation and releases their stale AI budget holds.
+  await failExhaustedAttempts(env.DB);
+  await reconcileStaleBudgetReservations(env.DB, now);
   const ready = await listReadyJobs(env.DB, 3);
   for (const job of ready) {
     try {

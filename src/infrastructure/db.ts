@@ -1397,15 +1397,17 @@ export async function createJob(
 }
 
 export async function listReadyJobs(db: D1Database, limit = 10): Promise<Job[]> {
+  const now = new Date().toISOString();
   const result = await db
     .prepare(
       `SELECT * FROM jobs
-       WHERE (state = 'pending' AND next_run_at <= ?)
-           OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
+       WHERE ((state = 'pending' AND next_run_at <= ?)
+           OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))
+         AND attempts < 5
        ORDER BY next_run_at ASC
        LIMIT ?`,
     )
-    .bind(new Date().toISOString(), new Date().toISOString(), limit)
+    .bind(now, now, limit)
     .all<{
       id: string;
       kind: JobKind;
@@ -1435,6 +1437,28 @@ export async function listReadyJobs(db: D1Database, limit = 10): Promise<Job[]> 
   }));
 }
 
+/**
+ * Terminal-fail jobs that already used every allowed attempt. A Worker killed
+ * mid-invocation (CPU or memory limit) never reaches failJob, so without this
+ * sweep its expired lease would be reclaimed forever and its AI budget
+ * reservation would never be released. Matches failJob's attempts >= 5 rule.
+ */
+export async function failExhaustedAttempts(db: D1Database): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .prepare(
+      `UPDATE jobs
+        SET state = 'failed', last_error = COALESCE(last_error, 'Attempts exhausted'),
+            lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+        WHERE attempts >= 5
+          AND ((state = 'pending')
+            OR (state = 'running' AND lease_expires_at IS NOT NULL
+                AND lease_expires_at <= MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))))`,
+    )
+    .bind(now, now)
+    .run();
+}
+
 export async function claimJob(
   db: D1Database,
   jobId: string,
@@ -1447,7 +1471,8 @@ export async function claimJob(
     .prepare(
       `UPDATE jobs
        SET state = 'running', lease_token = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
-        WHERE id = ? AND ((state = 'pending' AND next_run_at <= ?) OR (state = 'running' AND lease_expires_at <= ?))
+        WHERE id = ? AND attempts < 5
+          AND ((state = 'pending' AND next_run_at <= ?) OR (state = 'running' AND lease_expires_at <= ?))
        RETURNING *`,
     )
     .bind(leaseToken, expires, now.toISOString(), jobId, now.toISOString(), now.toISOString())
@@ -1613,5 +1638,42 @@ export async function releaseBudgetReservation(
        WHERE day = ?`,
     )
     .bind(estimatedNeurons, new Date().toISOString(), day)
+    .run();
+}
+
+/**
+ * Release AI budget reservations left behind by killed invocations.
+ *
+ * Invariant: a reservation exists only while its job is live. reserveBudget
+ * runs under a live lease, and recordBudgetUsage/releaseBudgetReservation
+ * clear the hold before the job completes. So when no generate job holds an
+ * unexpired lease, every remaining reserved neuron on today's row is stale
+ * (an invocation died between reserve and record). D1 serializes statements,
+ * so a concurrent reserve either lands before our live check (job visible) or
+ * after the zeroing (its own hold survives); the worst case is one extra
+ * 500-neuron admission, never corrupted usage accounting.
+ */
+export async function reconcileStaleBudgetReservations(
+  db: D1Database,
+  now = new Date(),
+): Promise<void> {
+  const live = await db
+    .prepare(
+      `SELECT 1 FROM jobs
+        WHERE kind = 'generate' AND state = 'running' AND lease_expires_at IS NOT NULL
+          AND lease_expires_at > MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        LIMIT 1`,
+    )
+    .bind(now.toISOString())
+    .first();
+  if (live) return;
+
+  await db
+    .prepare(
+      `UPDATE ai_budget
+        SET reserved_neurons = 0, updated_at = ?
+        WHERE day = ? AND reserved_neurons > 0`,
+    )
+    .bind(now.toISOString(), now.toISOString().slice(0, 10))
     .run();
 }

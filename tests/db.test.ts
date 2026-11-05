@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getAdjacentArticles, getFeedLead, getPipelineStatus, getSiteState, insertArticle, listAllPublished, listFeedPage, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failExhaustedAttempts, failJob, getAdjacentArticles, getFeedLead, getPipelineStatus, getSiteState, insertArticle, listAllPublished, listFeedPage, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, listReadyJobs, reconcileStaleBudgetReservations, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
 import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
@@ -833,6 +833,114 @@ describe("site state reads", () => {
 
     expect(countQueries(seenFirst)).toHaveLength(1);
     expect(countQueries(seenSecond)).toHaveLength(1);
+  });
+});
+
+describe("job attempts cap", () => {
+  async function exhaustedJob(db: ReturnType<typeof sqliteDb>, state: "pending" | "running") {
+    await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    if (state === "running") await claimJob(db.db, "job", "worker");
+    db.sqlite.prepare("UPDATE jobs SET attempts = 5, lease_expires_at = '2020-01-01T00:00:00.000Z'").run();
+  }
+
+  it("terminal-fails exhausted jobs with a dead lease instead of reclaiming them", async () => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+
+    await failExhaustedAttempts(db.db);
+
+    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()).toEqual({ state: "failed" });
+    expect(await listReadyJobs(db.db)).toEqual([]);
+  });
+
+  it("terminal-fails exhausted pending jobs so none are orphaned", async () => {
+    const db = setup();
+    await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    db.sqlite.prepare("UPDATE jobs SET attempts = 5").run();
+
+    await failExhaustedAttempts(db.db);
+
+    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()).toEqual({ state: "failed" });
+  });
+
+  it("never offers exhausted jobs to the ready list or a claim", async () => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+    expect(await listReadyJobs(db.db)).toEqual([]);
+    expect(await claimJob(db.db, "job", "fresh-worker")).toBeNull();
+
+    db.sqlite.prepare("UPDATE jobs SET state = 'pending', attempts = 5, lease_expires_at = NULL").run();
+    expect(await listReadyJobs(db.db)).toEqual([]);
+    expect(await claimJob(db.db, "job", "fresh-worker")).toBeNull();
+  });
+
+  it("still claims the final allowed attempt", async () => {
+    const db = setup();
+    await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    db.sqlite.prepare("UPDATE jobs SET attempts = 4").run();
+
+    const job = await claimJob(db.db, "job", "worker");
+
+    expect(job?.attempts).toBe(5);
+    expect(job?.state).toBe("running");
+  });
+});
+
+describe("ai budget reconciliation", () => {
+  function seedBudget(db: ReturnType<typeof sqliteDb>, reserved: number, used = 0) {
+    const day = new Date().toISOString().slice(0, 10);
+    db.sqlite
+      .prepare("INSERT INTO ai_budget (day, reserved_neurons, used_neurons) VALUES (?, ?, ?)")
+      .run(day, reserved, used);
+    return day;
+  }
+  function readBudget(db: ReturnType<typeof sqliteDb>, day: string) {
+    return db.sqlite
+      .prepare("SELECT reserved_neurons, used_neurons FROM ai_budget WHERE day = ?")
+      .get(day);
+  }
+
+  it("clears stale reservations when no generate job is live", async () => {
+    const db = setup();
+    const day = seedBudget(db, 1500, 4000);
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 4000 });
+  });
+
+  it("keeps the reservation of a live generate job", async () => {
+    const db = setup();
+    const day = seedBudget(db, 500);
+    await createJob(db.db, { id: "gen", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    await claimJob(db.db, "gen", "worker");
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 500, used_neurons: 0 });
+  });
+
+  it("clears the hold once the holding job's lease expires", async () => {
+    const db = setup();
+    const day = seedBudget(db, 500);
+    await createJob(db.db, { id: "gen", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    await claimJob(db.db, "gen", "worker");
+    db.sqlite.exec("UPDATE jobs SET lease_expires_at = '2020-01-01T00:00:00.000Z'");
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 0 });
+  });
+
+  it("ignores live non-generate jobs when deciding holds are stale", async () => {
+    const db = setup();
+    const day = seedBudget(db, 500);
+    await createJob(db.db, { id: "ext", kind: "extract", articleId: "article", idempotencyKey: "extract:article" });
+    await claimJob(db.db, "ext", "worker");
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 0 });
   });
 });
 
