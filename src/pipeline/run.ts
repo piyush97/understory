@@ -20,6 +20,7 @@ import {
   completeJob,
   createJob,
   deferJob,
+  failExhaustedAttempts,
   failJob,
   findArticleBySlug,
   findArticlesByUrls,
@@ -33,6 +34,7 @@ import {
   listReadyJobs,
   listRecentSourceArticles,
   recordBudgetUsage,
+  reconcileStaleBudgetReservations,
   releaseBudgetReservation,
   reserveBudget,
   renewJobLease,
@@ -393,6 +395,10 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
     await recordBudgetUsage(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT, neuronsFromUsage(generation.usage, model));
 
     if (generation.ok) break;
+    // A length cut-off needs a larger max_tokens, not a repair prompt: the
+    // in-job retry would carry the failed output as extra input and face the
+    // same output budget. Fall through to the job-level retry instead.
+    if (generation.truncated) break;
     previous = { rawText: generation.rawText, issues: generation.issues };
     attempt += 1;
   }
@@ -400,9 +406,11 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   if (!generation || !generation.ok || !generation.explanation) {
     const issues = generation?.issues ?? [{ path: "(root)", message: "No generation result" }];
     const message = issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ").slice(0, 700);
-    // Unparseable/empty output is nondeterministic: retry the job with backoff
-    // before giving up, instead of losing the article to one bad sample.
-    if (generation?.retryable && job.attempts < 3) {
+    // Unparseable/empty output is nondeterministic: retry the job once with
+    // backoff before giving up, instead of losing the article to one bad
+    // sample. One job-level retry caps a retryable failure at 2 model calls
+    // when the output was truncated, 4 when an in-job repair was attempted.
+    if (generation?.retryable && job.attempts < 2) {
       await failJob(env.DB, job, message);
       return { ok: true, detail: `Generation output malformed; retrying: ${message}`, deferred: true };
     }
@@ -526,7 +534,10 @@ export async function runScheduled(env: Bindings, now = new Date()): Promise<voi
   }
 
   // Queue messages make each heavy step its own invocation. Duplicate messages
-  // are harmless because claimJob is atomic.
+  // are harmless because claimJob is atomic. The sweep also terminal-fails
+  // jobs killed mid-invocation and releases their stale AI budget holds.
+  await failExhaustedAttempts(env.DB);
+  await reconcileStaleBudgetReservations(env.DB, now);
   const ready = await listReadyJobs(env.DB, 3);
   for (const job of ready) {
     try {

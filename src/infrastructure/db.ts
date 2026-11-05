@@ -146,8 +146,10 @@ export async function listFeedPage(
   }
 
   if (options.cursor) {
-    where.push("(a.published_at < ? OR (a.published_at = ? AND a.id < ?))");
-    bindings.push(options.cursor.publishedAt, options.cursor.publishedAt, options.cursor.id);
+    // Composite range predicate: SQLite can seek the (published_at, id) index
+    // instead of walking every newer row (verified with EXPLAIN QUERY PLAN).
+    where.push("(a.published_at, a.id) < (?, ?)");
+    bindings.push(options.cursor.publishedAt, options.cursor.id);
   }
 
   bindings.push(limit + 1);
@@ -313,21 +315,21 @@ export async function getAdjacentArticles(
       .prepare(
         `${ARTICLE_SELECT}
          WHERE a.status = 'published'
-           AND (a.published_at > ? OR (a.published_at = ? AND a.id > ?))
+           AND (a.published_at, a.id) > (?, ?)
          ORDER BY a.published_at ASC, a.id ASC
          LIMIT 1`,
       )
-      .bind(publishedAt, publishedAt, articleId)
+      .bind(publishedAt, articleId)
       .first<ArticleSourceRow>(),
     db
       .prepare(
         `${ARTICLE_SELECT}
          WHERE a.status = 'published'
-           AND (a.published_at < ? OR (a.published_at = ? AND a.id < ?))
+           AND (a.published_at, a.id) < (?, ?)
          ORDER BY a.published_at DESC, a.id DESC
          LIMIT 1`,
       )
-      .bind(publishedAt, publishedAt, articleId)
+      .bind(publishedAt, articleId)
       .first<ArticleSourceRow>(),
   ]);
 
@@ -875,7 +877,19 @@ export type SiteState = {
   publicationVersion: string;
 };
 
-export async function getSiteState(db: D1Database): Promise<SiteState> {
+// Resolved values only, keyed by database handle: Workers must not share
+// in-flight I/O promises across requests, and tests use fresh handles.
+const siteStateMemo = new WeakMap<D1Database, { value: SiteState; at: number }>();
+
+export async function getSiteState(
+  db: D1Database,
+  options: { maxAgeMs?: number } = {},
+): Promise<SiteState> {
+  const { maxAgeMs } = options;
+  if (maxAgeMs !== undefined) {
+    const memo = siteStateMemo.get(db);
+    if (memo && Date.now() - memo.at < maxAgeMs) return memo.value;
+  }
   const row = await db
     .prepare(
       `SELECT
@@ -893,13 +907,15 @@ export async function getSiteState(db: D1Database): Promise<SiteState> {
       publication_version: string | null;
     }>();
 
-  return {
+  const state: SiteState = {
     published: row?.published ?? 0,
     sources: row?.sources ?? 0,
     topics: row?.topics ?? 0,
     inReview: row?.in_review ?? 0,
     publicationVersion: row?.publication_version ?? "0",
   };
+  if (maxAgeMs !== undefined) siteStateMemo.set(db, { value: state, at: Date.now() });
+  return state;
 }
 
 export async function listAllPublished(
@@ -1381,15 +1397,17 @@ export async function createJob(
 }
 
 export async function listReadyJobs(db: D1Database, limit = 10): Promise<Job[]> {
+  const now = new Date().toISOString();
   const result = await db
     .prepare(
       `SELECT * FROM jobs
-       WHERE (state = 'pending' AND next_run_at <= ?)
-           OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
+       WHERE ((state = 'pending' AND next_run_at <= ?)
+           OR (state = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?))
+         AND attempts < 5
        ORDER BY next_run_at ASC
        LIMIT ?`,
     )
-    .bind(new Date().toISOString(), new Date().toISOString(), limit)
+    .bind(now, now, limit)
     .all<{
       id: string;
       kind: JobKind;
@@ -1419,6 +1437,39 @@ export async function listReadyJobs(db: D1Database, limit = 10): Promise<Job[]> 
   }));
 }
 
+/**
+ * Terminal-fail jobs that already used every allowed attempt. A Worker killed
+ * mid-invocation (CPU or memory limit) never reaches failJob, so without this
+ * sweep its expired lease would be reclaimed forever. Retire unreviewed
+ * articles in the same transaction, then recover suppressed duplicates.
+ */
+export async function failExhaustedAttempts(db: D1Database): Promise<void> {
+  const now = new Date().toISOString();
+  const results = await db.batch<{ article_id: string | null }>([
+    db.prepare(
+      `UPDATE jobs
+        SET state = 'failed', last_error = COALESCE(last_error, 'Attempts exhausted'),
+            lease_token = NULL, lease_expires_at = NULL, updated_at = ?
+        WHERE attempts >= 5
+          AND ((state = 'pending')
+            OR (state = 'running' AND lease_expires_at IS NOT NULL
+                AND lease_expires_at <= MAX(?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))))
+        RETURNING article_id`,
+    )
+    .bind(now, now),
+    db.prepare(`UPDATE articles SET status = 'failed', last_error = 'Attempts exhausted', updated_at = ?
+      WHERE status IN ('discovered', 'extracting', 'generating') AND published_revision_id IS NULL
+        AND EXISTS (SELECT 1 FROM jobs WHERE article_id = articles.id
+          AND state = 'failed' AND attempts >= 5 AND updated_at = ?)
+        AND NOT EXISTS (SELECT 1 FROM jobs WHERE article_id = articles.id
+          AND state IN ('pending', 'running', 'deferred'))
+        AND NOT EXISTS (SELECT 1 FROM explanation_revisions WHERE article_id = articles.id
+          AND status IN ('draft', 'published'))`).bind(now, now),
+  ]);
+  const articles = new Set((results[0]?.results ?? []).map((row) => row.article_id));
+  for (const articleId of articles) if (articleId) await requeueDuplicates(db, articleId);
+}
+
 export async function claimJob(
   db: D1Database,
   jobId: string,
@@ -1431,7 +1482,8 @@ export async function claimJob(
     .prepare(
       `UPDATE jobs
        SET state = 'running', lease_token = ?, lease_expires_at = ?, attempts = attempts + 1, updated_at = ?
-        WHERE id = ? AND ((state = 'pending' AND next_run_at <= ?) OR (state = 'running' AND lease_expires_at <= ?))
+        WHERE id = ? AND attempts < 5
+          AND ((state = 'pending' AND next_run_at <= ?) OR (state = 'running' AND lease_expires_at <= ?))
        RETURNING *`,
     )
     .bind(leaseToken, expires, now.toISOString(), jobId, now.toISOString(), now.toISOString())
@@ -1597,5 +1649,27 @@ export async function releaseBudgetReservation(
        WHERE day = ?`,
     )
     .bind(estimatedNeurons, new Date().toISOString(), day)
+    .run();
+}
+
+/**
+ * Charge orphaned holds at their reserved estimate: inference may already
+ * have been billed. Never refund unknown usage. Check ownership in the UPDATE
+ * itself so a concurrent claim/reservation cannot be erased. Even an expired
+ * running job may still return usage; wait for it to finish or be retired.
+ */
+export async function reconcileStaleBudgetReservations(
+  db: D1Database,
+  now = new Date(),
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE ai_budget
+        SET used_neurons = used_neurons + reserved_neurons,
+            reserved_neurons = 0, updated_at = ?
+        WHERE day = ? AND reserved_neurons > 0
+          AND NOT EXISTS (SELECT 1 FROM jobs WHERE kind = 'generate' AND state = 'running')`,
+    )
+    .bind(now.toISOString(), now.toISOString().slice(0, 10))
     .run();
 }

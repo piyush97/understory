@@ -7,7 +7,9 @@ import { IconArrowLeft } from "../components/icons";
 async function siteFor(c: Context<AppEnv>) {
   if (c.get("site")) return c.get("site")!;
   try {
-    return await getSiteState(c.env.DB);
+    // Memoized: unmatched scanner paths never touch cachePage, so without this
+    // every 404 would run the full COUNT query.
+    return await getSiteState(c.env.DB, { maxAgeMs: 30_000 });
   } catch {
     return {
       published: 0,

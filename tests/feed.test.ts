@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/web/index";
+import { TOPIC_IDS } from "../src/content/topics";
 import type { Bindings } from "../src/shared/env";
 
 const db = vi.hoisted(() => ({
@@ -29,6 +30,26 @@ describe("public routes", () => {
   it("returns 404 for an unknown topic filter", async () => {
     const response = await fetchPage("/?topic=not-a-topic");
     expect(response.status).toBe(404);
+  });
+
+  it("rejects an unknown topic before running any feed queries", async () => {
+    const response = await fetchPage("/?topic=not-a-topic");
+    expect(response.status).toBe(404);
+    expect(db.listTopics).not.toHaveBeenCalled();
+    expect(db.listFeedPage).not.toHaveBeenCalled();
+    expect(db.listPendingArticles).not.toHaveBeenCalled();
+    expect(db.getFeedLead).not.toHaveBeenCalled();
+  });
+
+  it("runs the feed queries for a known topic", async () => {
+    db.listTopics.mockResolvedValue([
+      { id: TOPIC_IDS[0]!, label: "Known", description: null, count: 1, sort_order: 0 },
+    ]);
+    const response = await fetchPage(`/?topic=${TOPIC_IDS[0]}`);
+    expect(response.status).toBe(200);
+    expect(db.listFeedPage.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ topic: TOPIC_IDS[0] }),
+    );
   });
 
   it("keeps the local-only bookmarks page out of search indexes", async () => {

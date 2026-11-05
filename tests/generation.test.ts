@@ -249,6 +249,41 @@ describe("model calls", () => {
     expect(result.retryable).toBe(true);
   });
 
+  it("marks token-limited failures as truncated", async () => {
+    const ai = {
+      run: async () => ({
+        choices: [{ finish_reason: "length", message: { content: '{"contextHeadline": "cut' } }],
+      }),
+    } as unknown as Ai;
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.ok).toBe(false);
+    expect(result.truncated).toBe(true);
+  });
+
+  it.each(["schema", "editorial"])("allows a fresh retry after truncated output fails %s validation", async (failure) => {
+    const broken = structuredClone(explanation);
+    broken.sources[0]!.url = "https://invented.example/post";
+    const ai = {
+      run: async () => ({ choices: [{ finish_reason: "length", message: {
+        content: failure === "schema" ? "{}" : JSON.stringify(broken),
+      } }] }),
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null);
+
+    expect(result.ok).toBe(false);
+    expect(result.truncated).toBe(true);
+    expect(result.retryable).toBe(true);
+  });
+
+  it("leaves ordinary malformed output unmarked for repair", async () => {
+    const ai = {
+      run: async () => ({ response: '{"contextHeadline": "short"' }),
+    } as unknown as Ai;
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.truncated).toBeFalsy();
+  });
+
   it("reserves zero as a valid budget kill switch", () => {
     expect(dailyNeuronBudget("0")).toBe(0);
     expect(dailyNeuronBudget("12000")).toBe(9000);

@@ -1,6 +1,7 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../../shared/env";
 import type { ArticleWithSource } from "../../domain/article";
+import { TOPIC_IDS } from "../../content/topics";
 import { encodeCursor, decodeCursor } from "../../domain/pagination";
 import { getFeedLead, listFeedPage, listPendingArticles, listTopics } from "../../infrastructure/db";
 import { Layout } from "../components/layout";
@@ -15,6 +16,10 @@ export async function renderFeed(c: Context<AppEnv>) {
   const db = c.env.DB;
   const site = c.get("site");
   const topicId = c.req.query("topic")?.trim() || null;
+  // Reject unknown topics before any query: scanner traffic with junk filters
+  // would otherwise run the feed, pending, and lead scans on every request.
+  // Topics are seeded from the same TOPIC_SEEDS list (scripts/seed.ts).
+  if (topicId && !TOPIC_IDS.includes(topicId)) return renderNotFound(c);
   const cursor = decodeCursor(c.req.query("cursor"));
 
   const [topics, page, pending] = await Promise.all([

@@ -310,6 +310,39 @@ describe("selection gate", () => {
     expect(mocks.generate).toHaveBeenCalledTimes(2);
   });
 
+  it("does not spend a repair attempt on token-limited output", async () => {
+    await generateJob();
+    mocks.generate.mockResolvedValue({
+      ok: false, explanation: null, issues: [{ path: "(root)", message: "Model output hit the token limit" }],
+      rawText: '{"contextHeadline": "cut', usage: { inputTokens: 100, outputTokens: 50 },
+      retryable: true, truncated: true,
+    });
+
+    const result = await processJob(env, "job");
+
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+    expect(result.deferred).toBe(true);
+    expect(store.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()).toEqual({ state: "pending" });
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("generating");
+  });
+
+  it("gives up after the second job attempt on retryable output", async () => {
+    await generateJob();
+    store.sqlite.prepare("UPDATE jobs SET attempts = 1").run();
+    mocks.generate.mockResolvedValue({
+      ok: false, explanation: null, issues: [{ path: "(root)", message: "Model output hit the token limit" }],
+      rawText: '{"contextHeadline": "cut', usage: { inputTokens: 100, outputTokens: 50 },
+      retryable: true, truncated: true,
+    });
+
+    const result = await processJob(env, "job");
+
+    expect(store.sqlite.prepare("SELECT state, attempts FROM jobs WHERE id = 'job'").get()).toEqual({ state: "failed", attempts: 2 });
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("failed");
+    expect(result.ok).toBe(false);
+    expect(mocks.generate).toHaveBeenCalledTimes(1);
+  });
+
   it("requeues a skipped duplicate when extraction fails on the third attempt", async () => {
     skippedDuplicate();
     await createJob(store.db, { id: "job", kind: "extract", articleId: "article", idempotencyKey: "extract:article" });
@@ -662,6 +695,19 @@ describe("pipeline consistency", () => {
     store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run(new Date(now.getTime() - 11 * 60_000).toISOString());
     await runScheduled(env, now);
     expect((env.PIPELINE_QUEUE.send as ReturnType<typeof vi.fn>).mock.calls).not.toContainEqual([{ kind: "discover", reason: "cron" }]);
+  });
+  it("retires killed jobs and charges their orphaned budget during the scheduled sweep", async () => {
+    await generateJob();
+    store.sqlite.exec("UPDATE jobs SET state = 'running', attempts = 5, lease_expires_at = '2000-01-01'");
+    store.sqlite.prepare("INSERT INTO ai_budget (day, reserved_neurons, used_neurons) VALUES (?, 500, 1000)")
+      .run(new Date().toISOString().slice(0, 10));
+
+    await runScheduled(env);
+
+    expect(store.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()?.state).toBe("failed");
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("failed");
+    expect(store.sqlite.prepare("SELECT used_neurons, reserved_neurons FROM ai_budget").get())
+      .toEqual({ used_neurons: 1500, reserved_neurons: 0 });
   });
   it("retires a rejected generation instead of retrying the whole job", async () => {
     await generateJob();

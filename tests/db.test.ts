@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { approveRevision, claimJob, completeJob, createJob, deferJob, failJob, getFeedLead, getPipelineStatus, insertArticle, listAllPublished, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
+import { approveRevision, claimJob, completeJob, createJob, deferJob, failExhaustedAttempts, failJob, getAdjacentArticles, getFeedLead, getPipelineStatus, getSiteState, insertArticle, listAllPublished, listFeedPage, listPublishedIndex, listRecentPublishedContent, insertRevision, listRecentSkippedArticles, listRecentSourceArticles, listReadyJobs, reconcileStaleBudgetReservations, rejectRevision, renewJobLease, requeueDuplicates, saveSnapshot, setArticleStatus } from "../src/infrastructure/db";
 import { articleInput, seed, seedPublished, seedRevision, sqliteDb } from "./helpers/sqlite";
 
 const databases: ReturnType<typeof sqliteDb>[] = [];
@@ -8,6 +8,24 @@ afterEach(() => { vi.useRealTimers(); for (const db of databases.splice(0)) db.s
 async function lease(db: ReturnType<typeof sqliteDb>) {
   await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
   return (await claimJob(db.db, "job", "worker"))!;
+}
+
+function capturePrepare(db: ReturnType<typeof sqliteDb>): string[] {
+  const seen: string[] = [];
+  const real = (db.db as { prepare: (sql: string) => unknown }).prepare;
+  (db.db as { prepare: (sql: string) => unknown }).prepare = (sql: string) => {
+    seen.push(sql);
+    return real.call(db.db, sql);
+  };
+  return seen;
+}
+
+function queryPlan(db: ReturnType<typeof sqliteDb>, sql: string): string {
+  const placeholders = (sql.match(/\?/g) ?? []).length;
+  const rows = db.sqlite
+    .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+    .all(...Array(placeholders).fill("x")) as Array<{ detail: string }>;
+  return rows.map((row) => row.detail).join(" | ");
 }
 
 describe("pipeline status", () => {
@@ -768,5 +786,280 @@ describe("discovery listings", () => {
     expect(content.map((row) => row.slug)).toContain("pub");
     expect(content.map((row) => row.slug)).not.toContain("skip");
     expect(JSON.parse(content.find((row) => row.slug === "pub")!.content).contextHeadline).toBeTruthy();
+  });
+});
+
+describe("site state reads", () => {
+  const countQueries = (seen: string[]) => seen.filter((sql) => sql.includes("COUNT(*) FROM articles"));
+
+  it("memoizes site state only when maxAgeMs is requested", async () => {
+    const db = setup();
+    const seen = capturePrepare(db);
+
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    expect(countQueries(seen)).toHaveLength(1);
+
+    // Callers that need fresh counts (the admin desk) must not opt in.
+    await getSiteState(db.db);
+    await getSiteState(db.db);
+    expect(countQueries(seen)).toHaveLength(3);
+  });
+
+  it("refetches once maxAgeMs has elapsed", async () => {
+    const db = setup();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-05T00:00:00.000Z"));
+    const seen = capturePrepare(db);
+
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    vi.setSystemTime(new Date("2026-11-05T00:00:20.000Z"));
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    expect(countQueries(seen)).toHaveLength(1);
+
+    vi.setSystemTime(new Date("2026-11-05T00:01:01.000Z"));
+    await getSiteState(db.db, { maxAgeMs: 30_000 });
+    expect(countQueries(seen)).toHaveLength(2);
+  });
+
+  it("keeps memos separate per database handle", async () => {
+    const first = setup();
+    const second = setup();
+    const seenFirst = capturePrepare(first);
+    const seenSecond = capturePrepare(second);
+
+    await getSiteState(first.db, { maxAgeMs: 30_000 });
+    await getSiteState(second.db, { maxAgeMs: 30_000 });
+
+    expect(countQueries(seenFirst)).toHaveLength(1);
+    expect(countQueries(seenSecond)).toHaveLength(1);
+  });
+});
+
+describe("job attempts cap", () => {
+  async function exhaustedJob(db: ReturnType<typeof sqliteDb>, state: "pending" | "running") {
+    await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    if (state === "running") await claimJob(db.db, "job", "worker");
+    db.sqlite.prepare("UPDATE jobs SET attempts = 5, lease_expires_at = '2020-01-01T00:00:00.000Z'").run();
+  }
+
+  it("terminal-fails exhausted jobs with a dead lease instead of reclaiming them", async () => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+
+    await failExhaustedAttempts(db.db);
+
+    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()).toEqual({ state: "failed" });
+    expect(await listReadyJobs(db.db)).toEqual([]);
+  });
+
+  it("terminal-fails exhausted pending jobs so none are orphaned", async () => {
+    const db = setup();
+    await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    db.sqlite.prepare("UPDATE jobs SET attempts = 5").run();
+
+    await failExhaustedAttempts(db.db);
+
+    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()).toEqual({ state: "failed" });
+  });
+
+  it("never offers exhausted jobs to the ready list or a claim", async () => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+    expect(await listReadyJobs(db.db)).toEqual([]);
+    expect(await claimJob(db.db, "job", "fresh-worker")).toBeNull();
+
+    db.sqlite.prepare("UPDATE jobs SET state = 'pending', attempts = 5, lease_expires_at = NULL").run();
+    expect(await listReadyJobs(db.db)).toEqual([]);
+    expect(await claimJob(db.db, "job", "fresh-worker")).toBeNull();
+  });
+
+  it("still claims the final allowed attempt", async () => {
+    const db = setup();
+    await createJob(db.db, { id: "job", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    db.sqlite.prepare("UPDATE jobs SET attempts = 4").run();
+
+    const job = await claimJob(db.db, "job", "worker");
+
+    expect(job?.attempts).toBe(5);
+    expect(job?.state).toBe("running");
+  });
+
+  it("retires an exhausted article and recovers its skipped duplicates", async () => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+    db.sqlite.exec(`INSERT INTO articles
+      (id, source_id, canonical_url, original_title, published_at, discovered_at, slug, status, duplicate_of)
+      VALUES ('dup', 'source', 'https://example.com/dup', 'Duplicate', '2026-11-01', '2026-11-01', 'dup', 'skipped', 'article')`);
+
+    await failExhaustedAttempts(db.db);
+
+    expect(db.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("failed");
+    expect(db.sqlite.prepare("SELECT status, duplicate_of FROM articles WHERE id = 'dup'").get())
+      .toEqual({ status: "discovered", duplicate_of: null });
+    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE article_id = 'dup'").get()?.state).toBe("pending");
+  });
+
+  it.each(["live lease", "draft", "published", "other job"])("preserves an article with %s", async (protection) => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+    if (protection === "live lease") db.sqlite.exec("UPDATE jobs SET lease_expires_at = '2099-01-01T00:00:00.000Z'");
+    if (protection === "draft") {
+      seedRevision(db);
+      db.sqlite.exec("UPDATE articles SET status = 'review'");
+    }
+    if (protection === "published") {
+      seedRevision(db, "published");
+      db.sqlite.exec("UPDATE articles SET status = 'published', published_revision_id = 'revision'");
+    }
+    if (protection === "other job") {
+      await createJob(db.db, { id: "other", kind: "generate", articleId: "article", idempotencyKey: "other" });
+    }
+    const before = db.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get();
+
+    await failExhaustedAttempts(db.db);
+
+    expect(db.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()).toEqual(before);
+    if (protection === "live lease") {
+      expect(db.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()?.state).toBe("running");
+    }
+  });
+
+  it("rolls back job retirement when the article update fails", async () => {
+    const db = setup();
+    await exhaustedJob(db, "running");
+    db.failOn("UPDATE articles");
+
+    await expect(failExhaustedAttempts(db.db)).rejects.toThrow("injected write failure");
+
+    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()?.state).toBe("running");
+    expect(db.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("generating");
+  });
+});
+
+describe("ai budget reconciliation", () => {
+  function seedBudget(db: ReturnType<typeof sqliteDb>, reserved: number, used = 0) {
+    const day = new Date().toISOString().slice(0, 10);
+    db.sqlite
+      .prepare("INSERT INTO ai_budget (day, reserved_neurons, used_neurons) VALUES (?, ?, ?)")
+      .run(day, reserved, used);
+    return day;
+  }
+  function readBudget(db: ReturnType<typeof sqliteDb>, day: string) {
+    return db.sqlite
+      .prepare("SELECT reserved_neurons, used_neurons FROM ai_budget WHERE day = ?")
+      .get(day);
+  }
+
+  it("charges orphaned reservations once when no generate job is running", async () => {
+    const db = setup();
+    const day = seedBudget(db, 1500, 4000);
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 5500 });
+    await reconcileStaleBudgetReservations(db.db);
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 5500 });
+  });
+
+  it("keeps the reservation of a live generate job", async () => {
+    const db = setup();
+    const day = seedBudget(db, 500);
+    await createJob(db.db, { id: "gen", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    await claimJob(db.db, "gen", "worker");
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 500, used_neurons: 0 });
+  });
+
+  it("keeps an expired running job's hold until the job is retired", async () => {
+    const db = setup();
+    const day = seedBudget(db, 500);
+    await createJob(db.db, { id: "gen", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    await claimJob(db.db, "gen", "worker");
+    db.sqlite.exec("UPDATE jobs SET lease_expires_at = '2020-01-01T00:00:00.000Z'");
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 500, used_neurons: 0 });
+  });
+
+  it("ignores live non-generate jobs when deciding holds are stale", async () => {
+    const db = setup();
+    const day = seedBudget(db, 500);
+    await createJob(db.db, { id: "ext", kind: "extract", articleId: "article", idempotencyKey: "extract:article" });
+    await claimJob(db.db, "ext", "worker");
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 0, used_neurons: 500 });
+  });
+
+  it("does not erase a reservation admitted while cleanup is starting", async () => {
+    const db = setup();
+    const day = seedBudget(db, 500, 1000);
+    await createJob(db.db, { id: "gen", kind: "generate", articleId: "article", idempotencyKey: "generate:snapshot" });
+    const prepare = db.db.prepare.bind(db.db);
+    db.db.prepare = (sql: string) => {
+      if (/UPDATE ai_budget/.test(sql)) {
+        db.sqlite.exec(`UPDATE jobs SET state = 'running', lease_token = 'concurrent-worker',
+          lease_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = 'gen';
+          UPDATE ai_budget SET reserved_neurons = reserved_neurons + 500;`);
+      }
+      return prepare(sql);
+    };
+
+    await reconcileStaleBudgetReservations(db.db);
+
+    expect(readBudget(db, day)).toEqual({ reserved_neurons: 1000, used_neurons: 1000 });
+  });
+});
+
+describe("feed query plans", () => {
+  it("range-seeks on (published_at, id) for cursor pages and adjacent lookups", async () => {
+    const db = setup();
+    const seen = capturePrepare(db);
+
+    await listFeedPage(db.db, { cursor: { publishedAt: "2026-11-02T00:00:00.000Z", id: "p2" }, limit: 5 });
+    await getAdjacentArticles(db.db, "2026-11-02T00:00:00.000Z", "p2");
+
+    const keyset = seen.filter((sql) => /\(a\.published_at\b/.test(sql));
+    expect(keyset).toHaveLength(3);
+    for (const statement of keyset) {
+      expect(queryPlan(db, statement)).toMatch(/published_at,id/);
+    }
+  });
+
+  it("pages the feed and finds neighbors across a timestamp tie", async () => {
+    const db = setup();
+    seedPublished(db, { id: "p0", publishedAt: "2026-11-01T00:00:00.000Z" });
+    seedPublished(db, { id: "p1", publishedAt: "2026-11-01T00:00:00.000Z" });
+    seedPublished(db, { id: "p2", publishedAt: "2026-11-02T00:00:00.000Z" });
+    seedPublished(db, { id: "p3", publishedAt: "2026-11-03T00:00:00.000Z" });
+    seedPublished(db, { id: "p4", publishedAt: "2026-11-04T00:00:00.000Z" });
+
+    const first = await listFeedPage(db.db, { limit: 3 });
+    expect(first.items.map((article) => article.id)).toEqual(["p4", "p3", "p2"]);
+    expect(first.hasMore).toBe(true);
+
+    const second = await listFeedPage(db.db, {
+      cursor: { publishedAt: "2026-11-02T00:00:00.000Z", id: "p2" },
+      limit: 3,
+    });
+    expect(second.items.map((article) => article.id)).toEqual(["p1", "p0"]);
+    expect(second.hasMore).toBe(false);
+
+    const { newer, older } = await getAdjacentArticles(db.db, "2026-11-02T00:00:00.000Z", "p2");
+    expect(newer?.id).toBe("p3");
+    expect(older?.id).toBe("p1");
+
+    const tiedPage = await listFeedPage(db.db, {
+      cursor: { publishedAt: "2026-11-01T00:00:00.000Z", id: "p1" }, limit: 3,
+    });
+    expect(tiedPage.items.map((article) => article.id)).toEqual(["p0"]);
+    const tiedNeighbors = await getAdjacentArticles(db.db, "2026-11-01T00:00:00.000Z", "p1");
+    expect(tiedNeighbors.newer?.id).toBe("p2");
+    expect(tiedNeighbors.older?.id).toBe("p0");
   });
 });
