@@ -829,6 +829,15 @@ function publicationStatements(
        .bind(articleId, topicId, topicId, reviewId),
     db
       .prepare(
+        `INSERT INTO api_changes (article_id, revision_id, type, occurred_at)
+          SELECT ?, ?, CASE WHEN EXISTS (SELECT 1 FROM api_changes WHERE article_id = ?)
+            THEN 'corrected' ELSE 'published' END, ?
+          WHERE EXISTS (SELECT 1 FROM articles WHERE id = ?)
+            AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
+      )
+      .bind(articleId, revisionId, articleId, now, articleId, reviewId),
+    db
+      .prepare(
         `UPDATE meta SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)
           WHERE key = 'publication_version' AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
       ).bind(reviewId),
