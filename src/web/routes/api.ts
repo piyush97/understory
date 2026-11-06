@@ -5,7 +5,7 @@ import {
   getPublishedArticleBySlug,
   listFeedPage,
 } from "../../infrastructure/db";
-import { parseExplanation, parseProvenance } from "../lib/content";
+import { parseExplanation } from "../lib/content";
 import { absoluteUrl } from "../lib/format";
 
 export async function renderApiArticles(c: Context<AppEnv>) {
@@ -40,6 +40,10 @@ export async function renderApiArticles(c: Context<AppEnv>) {
   });
 }
 
+/**
+ * Free summary of one explainer. The full explainer body, revisions, and the
+ * change feed are the paid API (/api/v1); this route points callers there.
+ */
 export async function renderApiArticle(c: Context<AppEnv>) {
   const slug = c.req.param("slug");
   if (!slug) return c.json({ error: "not_found" }, 404);
@@ -47,27 +51,26 @@ export async function renderApiArticle(c: Context<AppEnv>) {
   if (!article) return c.json({ error: "not_found" }, 404);
   const explanation = parseExplanation(article.revisionContent);
   if (!explanation) return c.json({ error: "revision_invalid" }, 500);
-  const provenance = parseProvenance(article.revisionProvenance);
-
   return c.json({
     id: article.id,
     slug: article.slug,
     url: absoluteUrl(c.env.SITE_URL, `/articles/${article.slug}`),
+    title: explanation.contextHeadline,
     originalTitle: article.originalTitle,
     originalUrl: article.canonicalUrl,
+    dek: explanation.dek,
+    oneSentence: explanation.oneSentence,
+    tldr: explanation.tldr,
+    topic: article.topicLabel,
     source: {
       name: article.sourceName,
       url: article.sourceSiteUrl,
     },
     publishedAt: article.publishedAt,
-    revision: {
-      id: article.revisionId,
-      reviewedBy: provenance.reviewedBy ?? null,
-      modelId: provenance.modelId ?? null,
-      promptVersion: provenance.promptVersion ?? null,
-      schemaVersion: provenance.schemaVersion ?? null,
-      sourceSnapshotId: provenance.sourceSnapshotId ?? null,
+    readingMinutes: explanation.readingMinutes,
+    fullExplainer: {
+      api: absoluteUrl(c.env.SITE_URL, `/api/v1/articles/${article.id}`),
+      docs: absoluteUrl(c.env.SITE_URL, "/developers"),
     },
-    explanation,
   });
 }

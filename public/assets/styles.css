@@ -3477,3 +3477,46 @@ a.field-value {
     text-decoration: none;
   }
 }
+
+/* Developer API page */
+.developers .login-form {
+  max-width: 460px;
+}
+
+.developers-plans {
+  display: grid;
+  gap: 6px 0;
+  margin: 12px 0 16px;
+}
+
+.developers-plans dt {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.developers-plans dd {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.developers-key {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.developers-error {
+  margin: 0 0 4px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--redline);
+  color: var(--ink);
+}

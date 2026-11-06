@@ -133,7 +133,7 @@ export async function renderLlmsTxt(c: Context<AppEnv>) {
     "## Machine-readable",
     "",
     `- [Full text of recent explainers](${url("/llms-full.txt")}): plain text of the newest 50`,
-    `- [Articles API](${url("/api/articles")}): JSON list; \`/api/articles/<slug>\` returns one explainer`,
+    `- [Articles API](${url("/api/articles")}): JSON list; \`/api/articles/<slug>\` returns one summary. Full explainers need a key: see /developers`,
     `- [RSS feed](${url("/feed.xml")}): newest 50`,
     `- [Sitemap](${url("/sitemap.xml")})`,
     "",

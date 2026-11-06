@@ -20,6 +20,16 @@ export type Bindings = {
   REQUIRE_ACCESS_JWT?: string;
   SEED_ON_START?: string;
   INDEXNOW_KEY?: string;
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET?: string;
+  /** Comma-separated hostnames Turnstile may report; defaults to SITE_URL's host. */
+  TURNSTILE_HOSTNAMES?: string;
+  /** Hosted checkout link for the paid variant, e.g. https://<store>.lemonsqueezy.com/buy/<id>. */
+  LEMONSQUEEZY_CHECKOUT_URL?: string;
+  LEMONSQUEEZY_WEBHOOK_SECRET?: string;
+  LEMONSQUEEZY_STORE_ID?: string;
+  LEMONSQUEEZY_VARIANT_ID?: string;
+  LEMONSQUEEZY_TEST_MODE?: string;
 };
 
 export type Variables = {

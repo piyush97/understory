@@ -10,6 +10,8 @@ import { renderTopics } from "./routes/topics";
 import { renderSources } from "./routes/sources";
 import { renderAbout } from "./routes/about";
 import { renderBookmarks } from "./routes/bookmarks";
+import { handleCheckout, handleTrial, renderDevelopers } from "./routes/developers";
+import { handleLemonSqueezyWebhook } from "./routes/billing";
 import {
   handleApprove,
   handleDiscover,
@@ -125,6 +127,10 @@ app.get("/topics", (c) => cachePage(c, 900, () => renderTopics(c)));
 app.get("/sources", (c) => cachePage(c, 900, () => renderSources(c)));
 app.get("/about", (c) => cachePage(c, 900, () => renderAbout(c)));
 app.get("/bookmarks", (c) => cachePage(c, 900, () => renderBookmarks(c)));
+app.get("/developers", (c) => cachePage(c, 900, () => renderDevelopers(c)));
+app.post("/developers/trial", (c) => handleTrial(c));
+app.post("/developers/checkout", (c) => handleCheckout(c));
+app.post("/api/billing/lemonsqueezy", (c) => handleLemonSqueezyWebhook(c));
 
 app.get("/api/articles", (c) => cachePage(c, 60, () => renderApiArticles(c), { site: false }));
 app.get("/api/articles/:slug", (c) => cachePage(c, 300, () => renderApiArticle(c), { site: false }));
