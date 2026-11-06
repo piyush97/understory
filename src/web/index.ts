@@ -20,6 +20,13 @@ import {
   renderReview,
 } from "./routes/admin";
 import { renderApiArticle, renderApiArticles } from "./routes/api";
+import {
+  renderApiV1Article,
+  renderApiV1Articles,
+  renderApiV1Changes,
+  renderApiV1Revision,
+  renderApiV1Usage,
+} from "./routes/api-v1";
 import { renderFeedXml, renderLlmsFullTxt, renderLlmsTxt, renderRobots, renderSitemap } from "./routes/meta";
 import { renderError, renderNotFound } from "./routes/not-found";
 
@@ -122,6 +129,12 @@ app.get("/bookmarks", (c) => cachePage(c, 900, () => renderBookmarks(c)));
 app.get("/api/articles", (c) => cachePage(c, 60, () => renderApiArticles(c), { site: false }));
 app.get("/api/articles/:slug", (c) => cachePage(c, 300, () => renderApiArticle(c), { site: false }));
 
+app.get("/api/v1/articles", (c) => renderApiV1Articles(c));
+app.get("/api/v1/articles/:id", (c) => renderApiV1Article(c));
+app.get("/api/v1/articles/:id/revisions/:revisionId", (c) => renderApiV1Revision(c));
+app.get("/api/v1/changes", (c) => renderApiV1Changes(c));
+app.get("/api/v1/usage", (c) => renderApiV1Usage(c));
+
 app.get("/robots.txt", (c) => cachePage(c, 3600, () => renderRobots(c), { site: false }));
 app.get("/sitemap.xml", (c) => cachePage(c, 900, () => renderSitemap(c), { site: false }));
 app.get("/feed.xml", (c) => cachePage(c, 900, () => renderFeedXml(c), { site: false }));
@@ -159,6 +172,9 @@ app.onError((error, c) => {
       stack: error instanceof Error ? error.stack : undefined,
     }),
   );
+  if (c.req.path.startsWith("/api/v1/")) {
+    return c.json({ error: { code: "internal_error", message: "The request could not be served." } }, 500);
+  }
   return renderError(c);
 });
 
