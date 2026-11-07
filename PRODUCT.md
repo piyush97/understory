@@ -29,7 +29,7 @@ Articles are discovered from engineeringblogs.xyz. Original publishers and autho
 ## Capabilities and Constraints
 
 - Public feed, topic and publisher filters, article pages, citations, diagrams, and local bookmarks.
-- No accounts, comments, voting, public submissions, or chat with articles in v1.
+- No accounts, comments, voting, public submissions, or chat with articles in v1. Developers get API keys, not reader accounts: a trial from `/developers`, paid plans billed through Lemon Squeezy (see `docs/api-v1.md`).
 - No arbitrary URL ingestion and no unrestricted URL proxy.
 - Runs on Cloudflare free tier: one web Worker, one pipeline Worker, D1, Queues, Workers AI, Cron Triggers.
 - Daily generation is bounded and reserved. Exhausting the AI allowance pauses new generation; it must not break reading.

@@ -1,8 +1,21 @@
 # Understory API v1
 
 Paid, versioned read access to published Understory explainers. The free public
-API (`/api/articles`) is unchanged; this one adds stable identifiers, immutable
-revisions, a change feed, and metering.
+API (`/api/articles`, `/api/articles/:slug`) returns summaries only: headline,
+one-sentence summary, TL;DR, topic, source, and a `fullExplainer` link. Full
+explainers, stable identifiers, immutable revisions, a change feed, and metering
+need a key.
+
+## Getting a key
+
+Start a 14-day trial (1,000 requests, no card) at
+[/developers](https://understory.piyushmehta.com/developers). The key is shown once;
+Understory stores only its SHA-256 hash and does not email it. One trial per email,
+three per network per day.
+
+To subscribe ($99 a month, 25,000 requests), enter the key on the same page. Checkout
+runs on Lemon Squeezy, the merchant of record for payment, tax, and invoices. The
+subscription upgrades the existing key; no new key is issued.
 
 ## Authentication
 
@@ -76,7 +89,27 @@ Codes: `invalid_api_key` (401), `payment_required` (402), `invalid_topic` /
 3. Store `next_after` and repeat. A future `withdrawn` change means stop serving
    that article and retitle your local copy.
 
-## Provisioning
+## Billing webhook (operators)
+
+Lemon Squeezy posts subscription events to `POST /api/billing/lemonsqueezy`. The
+Worker verifies `X-Signature` (HMAC-SHA256 of the raw body), checks store, variant,
+and test mode, and ignores deliveries older than the last applied `updated_at`.
+
+| Lemon Squeezy status | Understory access |
+| --- | --- |
+| `active` | `active` through `renews_at` |
+| `on_trial` | `active` through `trial_ends_at` |
+| `cancelled` | `active` through `ends_at` |
+| `past_due` | `past_due`, 14-day grace from the first failure |
+| `paused`, `unpaid`, `expired` | `canceled` |
+
+Configuration: vars `TURNSTILE_SITE_KEY`, `TURNSTILE_HOSTNAMES` (optional),
+`LEMONSQUEEZY_CHECKOUT_URL`, `LEMONSQUEEZY_STORE_ID`, `LEMONSQUEEZY_VARIANT_ID`,
+`LEMONSQUEEZY_TEST_MODE`; secrets `TURNSTILE_SECRET`, `LEMONSQUEEZY_WEBHOOK_SECRET`.
+Each feature stays closed until its settings exist. Subscribe the webhook to
+`subscription_created` and `subscription_updated`.
+
+## Manual provisioning
 
 ```bash
 npm run api:provision -- --org acme --name "Acme Docs" --status trial --limit 1000 --remote

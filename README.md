@@ -234,7 +234,7 @@ enabled hostname, not just the custom domain.
 - D1: 5 million rows read/day, 100,000 rows written/day, 500 MB per database.
 - Queues: 10,000 operations/day, 24-hour retention.
 - Discovery HTML is capped before parsing, snapshots are bounded, and pages are cached in the Cache API keyed by publication version.
-- There are no accounts, comments, votes, public submissions, or chat with articles in v1.
+- There are no accounts, comments, votes, public submissions, or chat with articles in v1. Developers get API keys, not reader accounts: a trial from `/developers`, paid plans billed through Lemon Squeezy (see `docs/api-v1.md`).
 
 ## Repository map
 

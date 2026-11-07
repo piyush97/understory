@@ -3,7 +3,7 @@ import type { SiteState } from "../../infrastructure/db";
 import { issueNumber } from "../lib/format";
 import { IconArrowUpRight } from "./icons";
 
-export type ActiveNav = "index" | "topics" | "sources" | "bookmarks" | "about" | null;
+export type ActiveNav = "index" | "topics" | "sources" | "bookmarks" | "about" | "developers" | null;
 
 type LayoutProps = {
   children: Child;
@@ -25,6 +25,7 @@ const NAV: Array<{ id: Exclude<ActiveNav, null>; label: string; href: string }> 
   { id: "sources", label: "Sources", href: "/sources" },
   { id: "bookmarks", label: "Bookmarks", href: "/bookmarks" },
   { id: "about", label: "About", href: "/about" },
+  { id: "developers", label: "API", href: "/developers" },
 ];
 
 export function Layout({

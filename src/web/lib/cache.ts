@@ -14,7 +14,7 @@ async function publicationVersion(c: Context<AppEnv>): Promise<string> {
   return value;
 }
 
-async function loadSite(c: Context<AppEnv>, enabled: boolean): Promise<void> {
+export async function loadSite(c: Context<AppEnv>, enabled: boolean): Promise<void> {
   if (!enabled || c.get("site")) return;
   try {
     // 30s of count staleness is invisible to readers and keeps scanner traffic
