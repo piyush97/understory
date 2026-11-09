@@ -3,7 +3,8 @@ import type { AppEnv } from "../../shared/env";
 import type { ArticleWithSource } from "../../domain/article";
 import { TOPIC_IDS } from "../../content/topics";
 import { encodeCursor, decodeCursor } from "../../domain/pagination";
-import { getFeedLead, listFeedPage, listPendingArticles, listTopics } from "../../infrastructure/db";
+import { getFeedLead, listFeedPage, listPendingArticles } from "../../infrastructure/db";
+import { cachedTopics } from "../lib/cache";
 import { Layout } from "../components/layout";
 import { FeedItem } from "../components/feed-item";
 import { LeadStory } from "../components/lead";
@@ -23,7 +24,7 @@ export async function renderFeed(c: Context<AppEnv>) {
   const cursor = decodeCursor(c.req.query("cursor"));
 
   const [topics, page, pending] = await Promise.all([
-    listTopics(db),
+    cachedTopics(c),
     listFeedPage(db, { topic: topicId, cursor, limit: 20 }),
     listPendingArticles(db, 3),
   ]);
