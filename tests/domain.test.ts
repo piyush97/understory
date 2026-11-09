@@ -107,6 +107,25 @@ describe("explanation validation", () => {
     }
   });
 
+  it("still rejects block-id citations on runs and diagram nodes", () => {
+    const broken = structuredClone(explanation);
+    const firstBlock = broken.sections[0]?.blocks[0];
+    if (!firstBlock || firstBlock.type !== "p") throw new Error("fixture shape changed");
+    firstBlock.runs[0]!.cite = "b59";
+    broken.diagram.nodes[0]!.cite = "b96";
+
+    const result = validateExplanation(broken);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues.some((issue) => issue.message.includes("Unknown citation b59"))).toBe(
+        true,
+      );
+      expect(result.issues.some((issue) => issue.message.includes("Unknown citation b96"))).toBe(
+        true,
+      );
+    }
+  });
+
   it("rejects duplicate section ids and dangling diagram nodes", () => {
     const broken = structuredClone(explanation);
     const firstSection = broken.sections[0];

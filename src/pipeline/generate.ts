@@ -6,7 +6,7 @@ import {
   type Explanation,
   type ValidationIssue,
 } from "../domain/explanation";
-import { buildGenerationMessages, type GenerationMaterial } from "./prompt";
+import { buildGenerationMessages, VALID_CITE_IDS_TEXT, type GenerationMaterial } from "./prompt";
 
 const EXPLANATION_JSON_SCHEMA = explanationSchema.toJSONSchema();
 
@@ -32,7 +32,11 @@ export async function attemptGeneration(
   if (previous) {
     messages.push({
       role: "user",
-      content: `The previous attempt was rejected by the editor. Fix every issue and return the corrected JSON object only. Do not add commentary.\n\nIssues:\n${previous.issues
+      content: `The previous attempt was rejected by the editor. Fix every issue and return the corrected JSON object only. Do not add commentary.
+
+Valid cite ids: ${VALID_CITE_IDS_TEXT}. Any other cite id, including a block id, is rejected.
+
+Issues:\n${previous.issues
         .slice(0, 24)
         .map((issue) => `- ${issue.path}: ${issue.message}`)
         .join("\n")}\n\nPrevious output:\n${previous.rawText.slice(0, 8_000)}`,
@@ -79,6 +83,31 @@ export async function attemptGeneration(
 
   const validation = validateExplanation(parsed);
   if (!validation.ok) {
+    const repaired = stripUnknownCites(parsed);
+    const repairedValidation = validateExplanation(repaired);
+    if (repairedValidation.ok) {
+      const semanticIssues = checkEditorialRules(repairedValidation.value, material);
+      if (semanticIssues.length > 0) {
+        return {
+          ok: false,
+          explanation: null,
+          issues: semanticIssues,
+          rawText,
+          usage: toTokenUsage(output.usage),
+          truncated,
+          retryable: truncated,
+        };
+      }
+
+      return {
+        ok: true,
+        explanation: finalizeExplanation(repairedValidation.value),
+        issues: [],
+        rawText,
+        usage: toTokenUsage(output.usage),
+      };
+    }
+
     return {
       ok: false,
       explanation: null,
@@ -110,6 +139,64 @@ export async function attemptGeneration(
     rawText,
     usage: toTokenUsage(output.usage),
   };
+}
+
+export function stripUnknownCites(input: unknown): unknown {
+  const record = asRecord(input);
+  if (!record) return input;
+
+  const allowed = new Set<string>();
+  for (const source of asArray(record.sources)) {
+    const sourceRecord = asRecord(source);
+    if (sourceRecord && typeof sourceRecord.id === "string") allowed.add(sourceRecord.id);
+  }
+  if (allowed.size === 0) return input;
+
+  const repaired = structuredClone(record);
+  for (const section of asArray(repaired.sections)) {
+    const sectionRecord = asRecord(section);
+    if (!sectionRecord) continue;
+    for (const block of asArray(sectionRecord.blocks)) stripBlockCites(block, allowed);
+  }
+
+  const eli5 = asRecord(repaired.eli5);
+  if (eli5) {
+    for (const block of asArray(eli5.body)) stripBlockCites(block, allowed);
+  }
+
+  const diagram = asRecord(repaired.diagram);
+  if (diagram) {
+    for (const node of asArray(diagram.nodes)) stripCite(asRecord(node), allowed);
+    for (const edge of asArray(diagram.edges)) stripCite(asRecord(edge), allowed);
+  }
+
+  return repaired;
+}
+
+function stripBlockCites(value: unknown, allowed: Set<string>): void {
+  const block = asRecord(value);
+  if (!block) return;
+
+  if (block.type === "list") {
+    for (const item of asArray(block.items)) {
+      for (const run of asArray(item)) stripCite(asRecord(run), allowed);
+    }
+    return;
+  }
+
+  if (block.type === "p" || block.type === "quote" || block.type === "note") {
+    for (const run of asArray(block.runs)) stripCite(asRecord(run), allowed);
+  }
+}
+
+function stripCite(holder: Record<string, unknown> | null, allowed: Set<string>): void {
+  if (holder && typeof holder.cite === "string" && !allowed.has(holder.cite)) {
+    delete holder.cite;
+  }
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 export function checkEditorialRules(
