@@ -131,6 +131,11 @@ export async function runDiscovery(env: Bindings, reason: string): Promise<RunRe
       };
     }
 
+    if (source.status === "paused") {
+      skipped += 1;
+      continue;
+    }
+
     const articleId = await articleIdFromUrl(post.url);
     const slug = await uniqueSlug(env, post.title, post.url);
     const wasInserted = await insertArticle(env.DB, {
