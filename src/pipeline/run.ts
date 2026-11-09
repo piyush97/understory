@@ -45,7 +45,7 @@ import {
   upsertSource,
 } from "../infrastructure/db";
 import { bool, dailyNeuronBudget, type Bindings, type QueueMessage } from "../shared/env";
-import { fetchPublicText } from "../shared/fetch";
+import { fetchPublicText, PublicFetchError } from "../shared/fetch";
 import { pingIndexNow } from "../shared/indexnow";
 import { parseDiscoveryHtml } from "./discovery";
 import { extractArticle, fetchArticlePage, toSnapshot } from "./extract";
@@ -302,8 +302,20 @@ export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult>
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // 429: the site asked us to slow down; wait as long as it says before retrying.
+    if (error instanceof PublicFetchError && error.status === 429 && job.attempts < 3) {
+      const delay = Math.min(3600, Math.max(60, error.retryAfterSeconds ?? 600));
+      await failJob(env.DB, job, message, { retryAfterSeconds: delay });
+      return { ok: true, detail: `Source rate-limited; retrying in ${delay}s.`, deferred: true };
+    }
+    // The site refused or removed the page; retrying repeats the same answer.
+    const permanent = error instanceof PublicFetchError && [401, 403, 404, 410].includes(error.status);
     const failed = await setArticleStatus(env.DB, article.id, "failed", message.slice(0, 500), job);
-    if (failed && job.attempts >= 3) await requeueDuplicates(env.DB, article.id);
+    if (failed && (permanent || job.attempts >= 3)) await requeueDuplicates(env.DB, article.id);
+    if (permanent) {
+      await failJob(env.DB, job, message, { terminal: true });
+      return { ok: false, detail: message };
+    }
     throw error;
   }
 }

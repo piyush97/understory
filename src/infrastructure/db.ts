@@ -253,6 +253,23 @@ export async function getPublishedArticleBySlug(
   };
 }
 
+// Cheap indexed lookup for the article page cache key. Returns null for
+// missing or unpublished slugs so callers can bypass the cache entirely.
+export async function getPublishedRevisionIdBySlug(
+  db: D1Database,
+  slug: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT published_revision_id FROM articles
+       WHERE slug = ? AND status = 'published' AND published_revision_id IS NOT NULL
+       LIMIT 1`,
+    )
+    .bind(slug)
+    .first<{ published_revision_id: string | null }>();
+  return row?.published_revision_id ?? null;
+}
+
 export async function listRelatedArticles(
   db: D1Database,
   articleId: string,

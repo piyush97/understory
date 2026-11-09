@@ -3,7 +3,7 @@ import { jsxRenderer } from "hono/jsx-renderer";
 import type { AppEnv, Bindings } from "../shared/env";
 import { bool } from "../shared/env";
 import { getSiteState } from "../infrastructure/db";
-import { cachePage } from "./lib/cache";
+import { ARTICLE_CACHE_SECONDS, cachePage } from "./lib/cache";
 import { renderFeed } from "./routes/feed";
 import { renderArticle } from "./routes/article";
 import { renderTopics } from "./routes/topics";
@@ -120,7 +120,11 @@ app.use("/api/*", async (c, next) => {
 app.options("/api/*", (c) => c.body(null, 204));
 
 app.get("/", (c) => cachePage(c, 120, () => renderFeed(c)));
-app.get("/articles/:slug", (c) => cachePage(c, 600, () => renderArticle(c)));
+app.get("/articles/:slug", (c) =>
+  cachePage(c, ARTICLE_CACHE_SECONDS, () => renderArticle(c), {
+    articleSlug: c.req.param("slug"),
+  }),
+);
 app.get("/topics", (c) => cachePage(c, 900, () => renderTopics(c)));
 app.get("/sources", (c) => cachePage(c, 900, () => renderSources(c)));
 app.get("/about", (c) => cachePage(c, 900, () => renderAbout(c)));

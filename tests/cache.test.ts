@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const db = vi.hoisted(() => ({ getSiteState: vi.fn(), getPublicationVersion: vi.fn() }));
+const db = vi.hoisted(() => ({
+  getSiteState: vi.fn(),
+  getPublicationVersion: vi.fn(),
+  getPublishedRevisionIdBySlug: vi.fn(),
+  listTopics: vi.fn(),
+}));
 vi.mock("../src/infrastructure/db", () => db);
 
 function ctx(url: string, waits: Promise<unknown>[] = []): any {
@@ -62,6 +67,10 @@ async function loadCachedSiteState() {
   return (await import("../src/web/lib/cache")).cachedSiteState;
 }
 
+async function loadCachedTopics() {
+  return (await import("../src/web/lib/cache")).cachedTopics;
+}
+
 describe("cachedSiteState", () => {
   it("returns the cached state without running the count query on a hit", async () => {
     db.getPublicationVersion.mockResolvedValue("7");
@@ -102,6 +111,48 @@ describe("cachedSiteState", () => {
   });
 });
 
+describe("cachedTopics", () => {
+  const topics = [
+    { id: "db", label: "Databases", description: null, sortOrder: 0, count: 3 },
+    { id: "ai", label: "AI", description: "Models", sortOrder: 1, count: 2 },
+  ];
+
+  it("returns the cached topics without querying D1 on a hit", async () => {
+    db.getPublicationVersion.mockResolvedValue("7");
+    const cachedTopics = await loadCachedTopics();
+    stubSiteStateCache({ hit: topics });
+    const result = await cachedTopics(ctx("https://x.test/topics"));
+    expect(result).toEqual(topics);
+    expect(db.listTopics).not.toHaveBeenCalled();
+  });
+
+  it("stores the fresh topics under the publication version on a miss", async () => {
+    db.getPublicationVersion.mockResolvedValue("7");
+    db.listTopics.mockResolvedValue(topics);
+    const cachedTopics = await loadCachedTopics();
+    const puts = stubSiteStateCache();
+    const waits: Promise<unknown>[] = [];
+    const result = await cachedTopics(ctx("https://x.test/topics", waits));
+    await Promise.all(waits);
+    expect(result).toEqual(topics);
+    expect(db.listTopics).toHaveBeenCalledTimes(1);
+    expect(puts).toHaveLength(1);
+    expect(new URL(puts[0]!.url).searchParams.get("v")).toBe("7");
+    expect(JSON.parse(puts[0]!.body)).toEqual(topics);
+    expect(puts[0]!.cacheControl).toBe("max-age=3600");
+  });
+
+  it("falls back to the database when the Cache API fails", async () => {
+    db.getPublicationVersion.mockResolvedValue("7");
+    db.listTopics.mockResolvedValue(topics);
+    const cachedTopics = await loadCachedTopics();
+    stubSiteStateCache({ fail: true });
+    const result = await cachedTopics(ctx("https://x.test/topics"));
+    expect(result).toEqual(topics);
+    expect(db.listTopics).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("cachePage key", () => {
   it("ignores unknown query params", async () => {
     db.getPublicationVersion.mockResolvedValue("7");
@@ -123,6 +174,71 @@ describe("cachePage key", () => {
     expect(url.searchParams.get("cursor")).toBe("abc");
     expect(url.searchParams.has("x")).toBe(false);
     expect(url.searchParams.get("__v")).toBe("7");
+  });
+});
+
+describe("cachePage article key", () => {
+  async function loadFresh() {
+    vi.resetModules();
+    return (await import("../src/web/lib/cache")).cachePage;
+  }
+
+  it("keys article pages by slug and revision, unaffected by other publishes", async () => {
+    db.getPublishedRevisionIdBySlug.mockResolvedValue("rev-1");
+    db.getPublicationVersion.mockResolvedValue("7");
+    db.getSiteState.mockResolvedValue({ published: 1, publicationVersion: "7" });
+    const keys = stubCache();
+
+    let cachePage = await load();
+    await cachePage(ctx("https://x.test/articles/foo"), 60, () => new Response("a"), {
+      articleSlug: "foo",
+    });
+
+    db.getPublicationVersion.mockResolvedValue("8");
+    cachePage = await loadFresh();
+    await cachePage(ctx("https://x.test/articles/foo"), 60, () => new Response("a"), {
+      articleSlug: "foo",
+    });
+
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+    expect(new URL(keys[0]!).searchParams.get("__r")).toBe("rev-1");
+    expect(new URL(keys[0]!).searchParams.has("__v")).toBe(false);
+
+    db.getPublishedRevisionIdBySlug.mockResolvedValue("rev-2");
+    cachePage = await loadFresh();
+    await cachePage(ctx("https://x.test/articles/foo"), 60, () => new Response("a"), {
+      articleSlug: "foo",
+    });
+
+    expect(keys).toHaveLength(3);
+    expect(keys[2]).not.toBe(keys[0]);
+    expect(new URL(keys[2]!).searchParams.get("__r")).toBe("rev-2");
+  });
+
+  it("never reads or writes the cache for a slug without a published revision", async () => {
+    db.getPublishedRevisionIdBySlug.mockResolvedValue(null);
+    const matched: string[] = [];
+    const written: string[] = [];
+    const match = vi.fn(async (req: Request) => {
+      matched.push(req.url);
+      return undefined;
+    });
+    const put = vi.fn(async (req: Request) => {
+      written.push(req.url);
+    });
+    vi.stubGlobal("caches", { default: { match, put } });
+    const cachePage = await load();
+    const render = vi.fn(() => new Response("missing", { status: 404 }));
+
+    const response = await cachePage(ctx("https://x.test/articles/gone"), 60, render, {
+      articleSlug: "gone",
+    });
+
+    expect(response.status).toBe(404);
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(matched.filter((url) => url.includes("/articles/gone"))).toHaveLength(0);
+    expect(written.filter((url) => url.includes("/articles/gone"))).toHaveLength(0);
   });
 });
 
