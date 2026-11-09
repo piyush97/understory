@@ -25,6 +25,23 @@ export function publicHttpUrl(value: string | URL): URL {
   return url;
 }
 
+/** Non-OK upstream response; keeps the status so callers can tell "blocked" from "slow down". */
+export class PublicFetchError extends Error {
+  constructor(readonly status: number, readonly retryAfterSeconds: number | null = null) {
+    super(`Public fetch responded ${status}`);
+    this.name = "PublicFetchError";
+  }
+}
+
+/** Parse Retry-After (delta seconds or HTTP date); null when absent or invalid. */
+export function retryAfterSeconds(value: string | null, now = Date.now()): number | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  const at = Date.parse(trimmed);
+  return Number.isNaN(at) ? null : Math.max(0, Math.ceil((at - now) / 1000));
+}
+
 export type PublicFetchOptions = {
   maxBytes: number;
   timeoutMs?: number;
@@ -65,7 +82,7 @@ export async function fetchPublicText(value: string | URL, options: PublicFetchO
       }
       if (!response.ok) {
         if (response.body) void response.body.cancel().catch(() => {});
-        throw new Error(`Public fetch responded ${response.status}`);
+        throw new PublicFetchError(response.status, retryAfterSeconds(response.headers.get("retry-after")));
       }
       const contentType = response.headers.get("content-type") ?? "";
       const length = response.headers.get("content-length");
