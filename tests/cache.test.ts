@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({ getSiteState: vi.fn(), getPublicationVersion: vi.fn() }));
 vi.mock("../src/infrastructure/db", () => db);
 
-function ctx(url: string): any {
+function ctx(url: string, waits: Promise<unknown>[] = []): any {
   const store = new Map<string, unknown>();
   return {
     env: { ENVIRONMENT: "production", DB: {} },
     req: { url },
     get: (key: string) => store.get(key),
     set: (key: string, value: unknown) => void store.set(key, value),
-    executionCtx: { waitUntil: (p: Promise<unknown>) => void p },
+    executionCtx: { waitUntil: (p: Promise<unknown>) => { waits.push(p); } },
   };
 }
 
@@ -18,10 +18,34 @@ function stubCache(hit = false) {
   const keys: string[] = [];
   const cache = {
     match: async () => (hit ? new Response("cached") : undefined),
-    put: (r: Request) => { keys.push(r.url); return Promise.resolve(); },
+    put: (r: Request) => {
+      if (!r.url.startsWith("https://site-state.internal/")) keys.push(r.url);
+      return Promise.resolve();
+    },
   };
   vi.stubGlobal("caches", { default: cache });
   return keys;
+}
+
+function stubSiteStateCache(options: { hit?: unknown; fail?: boolean } = {}) {
+  const puts: Array<{ url: string; body: string; cacheControl: string | null }> = [];
+  const cache = {
+    match: async () => {
+      if (options.fail) throw new Error("cache down");
+      if (options.hit === undefined) return undefined;
+      return new Response(JSON.stringify(options.hit));
+    },
+    put: async (key: Request, response: Response) => {
+      if (options.fail) throw new Error("cache down");
+      puts.push({
+        url: key.url,
+        body: await response.text(),
+        cacheControl: response.headers.get("Cache-Control"),
+      });
+    },
+  };
+  vi.stubGlobal("caches", { default: cache });
+  return puts;
 }
 
 afterEach(() => {
@@ -33,6 +57,50 @@ afterEach(() => {
 async function load() {
   return (await import("../src/web/lib/cache")).cachePage;
 }
+
+async function loadCachedSiteState() {
+  return (await import("../src/web/lib/cache")).cachedSiteState;
+}
+
+describe("cachedSiteState", () => {
+  it("returns the cached state without running the count query on a hit", async () => {
+    db.getPublicationVersion.mockResolvedValue("7");
+    const cachedSiteState = await loadCachedSiteState();
+    const cached = { published: 9, sources: 4, topics: 2, inReview: 1, publicationVersion: "7" };
+    stubSiteStateCache({ hit: cached });
+    const state = await cachedSiteState(ctx("https://x.test/"));
+    expect(state).toEqual(cached);
+    expect(db.getSiteState).not.toHaveBeenCalled();
+  });
+
+  it("stores the fresh state under the publication version on a miss", async () => {
+    db.getPublicationVersion.mockResolvedValue("7");
+    const fresh = { published: 3, sources: 1, topics: 2, inReview: 0, publicationVersion: "7" };
+    db.getSiteState.mockResolvedValue(fresh);
+    const cachedSiteState = await loadCachedSiteState();
+    const puts = stubSiteStateCache();
+    const waits: Promise<unknown>[] = [];
+    const state = await cachedSiteState(ctx("https://x.test/", waits));
+    await Promise.all(waits);
+    expect(state).toEqual(fresh);
+    expect(db.getSiteState).toHaveBeenCalledTimes(1);
+    expect(puts).toHaveLength(1);
+    expect(new URL(puts[0]!.url).searchParams.get("v")).toBe("7");
+    expect(JSON.parse(puts[0]!.body)).toEqual(fresh);
+    expect(puts[0]!.cacheControl).toBe("max-age=3600");
+  });
+
+  it("falls back to the database when the Cache API fails", async () => {
+    db.getPublicationVersion.mockResolvedValue("7");
+    const fresh = { published: 3, sources: 1, topics: 2, inReview: 0, publicationVersion: "7" };
+    db.getSiteState.mockResolvedValue(fresh);
+    const cachedSiteState = await loadCachedSiteState();
+    stubSiteStateCache({ fail: true });
+    const state = await cachedSiteState(ctx("https://x.test/"));
+    expect(state).toEqual(fresh);
+    expect(db.getSiteState).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("cachePage key", () => {
   it("ignores unknown query params", async () => {

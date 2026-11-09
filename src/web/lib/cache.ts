@@ -1,8 +1,9 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../../shared/env";
-import { getPublicationVersion, getSiteState } from "../../infrastructure/db";
+import { getPublicationVersion, getSiteState, type SiteState } from "../../infrastructure/db";
 
 const VERSION_TTL_MS = 30_000;
+const SITE_STATE_KEY = "https://site-state.internal/v1";
 // Workers must not share I/O promises across requests, so only the resolved
 // value is memoized.
 let versionMemo: { value: string; at: number } | null = null;
@@ -14,12 +15,64 @@ async function publicationVersion(c: Context<AppEnv>): Promise<string> {
   return value;
 }
 
+function freshSiteState(c: Context<AppEnv>): Promise<SiteState> {
+  // 30s of count staleness is invisible to readers and keeps scanner traffic
+  // (404s, junk filters) from re-running the COUNT scans on every request.
+  return getSiteState(c.env.DB, { maxAgeMs: 30_000 });
+}
+
+export async function cachedSiteState(c: Context<AppEnv>): Promise<SiteState> {
+  const existing = c.get("site");
+  if (existing) return existing;
+
+  if (c.env.ENVIRONMENT !== "production" || typeof caches === "undefined") {
+    return freshSiteState(c);
+  }
+
+  let key: Request | null = null;
+  try {
+    const version = await publicationVersion(c);
+    key = new Request(`${SITE_STATE_KEY}?v=${encodeURIComponent(version)}`, { method: "GET" });
+    const cache = (caches as unknown as { default: Cache }).default;
+    const hit = await cache.match(key);
+    if (hit) return (await hit.json()) as SiteState;
+  } catch {
+    // Cache reads are best effort; fall through to a fresh D1 read.
+  }
+
+  const state = await freshSiteState(c);
+
+  if (key) {
+    try {
+      const cache = (caches as unknown as { default: Cache }).default;
+      const put = cache
+        .put(
+          key,
+          new Response(JSON.stringify(state), {
+            headers: {
+              "Content-Type": "application/json",
+              "Cache-Control": "max-age=3600",
+            },
+          }),
+        )
+        .catch(() => {});
+      try {
+        c.executionCtx.waitUntil(put);
+      } catch {
+        await put;
+      }
+    } catch {
+      // A failed write must not fail the request; the state is still returned.
+    }
+  }
+
+  return state;
+}
+
 async function loadSite(c: Context<AppEnv>, enabled: boolean): Promise<void> {
   if (!enabled || c.get("site")) return;
   try {
-    // 30s of count staleness is invisible to readers and keeps scanner traffic
-    // (404s, junk filters) from re-running the COUNT scans on every request.
-    c.set("site", await getSiteState(c.env.DB, { maxAgeMs: 30_000 }));
+    c.set("site", await cachedSiteState(c));
   } catch {
     c.set("site", { published: 0, sources: 0, topics: 0, inReview: 0, publicationVersion: "0" });
   }

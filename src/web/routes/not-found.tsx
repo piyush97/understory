@@ -1,15 +1,15 @@
 import type { Context } from "hono";
-import { getSiteState } from "../../infrastructure/db";
 import type { AppEnv } from "../../shared/env";
 import { Layout } from "../components/layout";
 import { IconArrowLeft } from "../components/icons";
+import { cachedSiteState } from "../lib/cache";
 
 async function siteFor(c: Context<AppEnv>) {
   if (c.get("site")) return c.get("site")!;
   try {
-    // Memoized: unmatched scanner paths never touch cachePage, so without this
-    // every 404 would run the full COUNT query.
-    return await getSiteState(c.env.DB, { maxAgeMs: 30_000 });
+    // Unmatched scanner paths never touch cachePage, so this shares the
+    // version-keyed Cache API lookup with public page rendering.
+    return await cachedSiteState(c);
   } catch {
     return {
       published: 0,
