@@ -731,6 +731,22 @@ describe("pipeline consistency", () => {
     expect(counted.filter((sql) => /canonical_url\s*=\s*\?/.test(sql))).toHaveLength(0);
     expect(counted.filter((sql) => /canonical_url\s+IN\s*\(/.test(sql))).toHaveLength(1);
   });
+  it("skips new posts from paused sources while still discovering active ones", async () => {
+    store.sqlite.prepare("UPDATE sources SET status = 'paused' WHERE id = 'source'").run();
+    const now = new Date().toISOString();
+    mocks.discovery.mockReturnValue([
+      { url: "https://example.com/paused-post", publishedAt: now, sourceSiteUrl: "https://example.com", title: "Paused post", sourceName: "Source" },
+      { url: "https://active.example/post", publishedAt: now, sourceSiteUrl: "https://active.example", title: "Active post", sourceName: "Active" },
+    ]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html></html>")));
+
+    const result = await runDiscovery(env, "test");
+
+    expect(store.sqlite.prepare("SELECT count(*) AS n FROM articles WHERE canonical_url = ?").get("https://example.com/paused-post")?.n).toBe(0);
+    expect(store.sqlite.prepare("SELECT count(*) AS n FROM articles WHERE canonical_url = ?").get("https://active.example/post")?.n).toBe(1);
+    expect(result.counts).toMatchObject({ inserted: 1, skipped: 1, queued: 1 });
+    expect(env.PIPELINE_QUEUE.send).toHaveBeenCalledOnce();
+  });
   it("reconciles previously discovered articles without an extraction job", async () => {
     store.sqlite.exec("UPDATE articles SET status = 'discovered'");
     mocks.discovery.mockReturnValue([{ url: "https://example.com/post", publishedAt: new Date().toISOString(), sourceSiteUrl: "https://example.com", title: "Test article", sourceName: "Source" }]);
