@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { SourceBlock } from "../src/domain/source";
 import { createJob } from "../src/infrastructure/db";
 import { processJob, runDiscovery, runScheduled } from "../src/pipeline/run";
+import { PublicFetchError } from "../src/shared/fetch";
 import { PROMPT_VERSION, SCHEMA_VERSION } from "../src/pipeline/prompt";
 import type { Bindings } from "../src/shared/env";
 import { explanation, seed, seedRevision, sqliteDb } from "./helpers/sqlite";
@@ -249,6 +250,32 @@ describe("selection gate", () => {
     expect(mocks.snapshot).not.toHaveBeenCalled();
     expect(store.sqlite.prepare("SELECT count(*) AS n FROM jobs WHERE kind = 'generate'").get()?.n).toBe(0);
     expect(env.PIPELINE_QUEUE.send).not.toHaveBeenCalled();
+  });
+
+  it("waits out a 429 using Retry-After instead of failing the article", async () => {
+    await extractJob("Rate limited", "https://example.com/slow", 900, [{ kind: "paragraph", text: textWords(900) }]);
+    mocks.fetchPage.mockRejectedValue(new PublicFetchError(429, 120));
+
+    const result = await processJob(env, "job");
+
+    expect(result).toMatchObject({ ok: true, deferred: true });
+    const job = store.sqlite.prepare("SELECT state, next_run_at FROM jobs WHERE id = 'job'").get() as { state: string; next_run_at: string };
+    expect(job.state).toBe("pending");
+    const wait = (Date.parse(job.next_run_at) - Date.now()) / 1000;
+    expect(wait).toBeGreaterThan(100);
+    expect(wait).toBeLessThanOrEqual(121);
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()).toEqual({ status: "extracting" });
+  });
+
+  it("fails a 403 source at once instead of retrying it", async () => {
+    await extractJob("Blocked", "https://example.com/blocked", 900, [{ kind: "paragraph", text: textWords(900) }]);
+    mocks.fetchPage.mockRejectedValue(new PublicFetchError(403));
+
+    expect((await processJob(env, "job")).ok).toBe(false);
+
+    expect(store.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()).toEqual({ state: "failed" });
+    expect(store.sqlite.prepare("SELECT status, last_error FROM articles WHERE id = 'article'").get())
+      .toEqual({ status: "failed", last_error: "Public fetch responded 403" });
   });
 
   it("scores a source at the 220-word floor instead of treating it as thin", async () => {
@@ -802,6 +829,22 @@ describe("pipeline consistency", () => {
     await runDiscovery({ ...env, DB: countedDb }, "test");
     expect(counted.filter((sql) => /canonical_url\s*=\s*\?/.test(sql))).toHaveLength(0);
     expect(counted.filter((sql) => /canonical_url\s+IN\s*\(/.test(sql))).toHaveLength(1);
+  });
+  it("skips new posts from paused sources while still discovering active ones", async () => {
+    store.sqlite.prepare("UPDATE sources SET status = 'paused' WHERE id = 'source'").run();
+    const now = new Date().toISOString();
+    mocks.discovery.mockReturnValue([
+      { url: "https://example.com/paused-post", publishedAt: now, sourceSiteUrl: "https://example.com", title: "Paused post", sourceName: "Source" },
+      { url: "https://active.example/post", publishedAt: now, sourceSiteUrl: "https://active.example", title: "Active post", sourceName: "Active" },
+    ]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html></html>")));
+
+    const result = await runDiscovery(env, "test");
+
+    expect(store.sqlite.prepare("SELECT count(*) AS n FROM articles WHERE canonical_url = ?").get("https://example.com/paused-post")?.n).toBe(0);
+    expect(store.sqlite.prepare("SELECT count(*) AS n FROM articles WHERE canonical_url = ?").get("https://active.example/post")?.n).toBe(1);
+    expect(result.counts).toMatchObject({ inserted: 1, skipped: 1, queued: 1 });
+    expect(env.PIPELINE_QUEUE.send).toHaveBeenCalledOnce();
   });
   it("reconciles previously discovered articles without an extraction job", async () => {
     store.sqlite.exec("UPDATE articles SET status = 'discovered'");

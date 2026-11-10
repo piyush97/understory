@@ -116,6 +116,14 @@ describe("prompt construction", () => {
     expect(user).toContain("ai-infrastructure");
     expect(user).toContain("Only use the allowed source urls");
   });
+
+  it("lists the exact valid cite ids and warns that other ids are rejected", () => {
+    const messages = buildGenerationMessages(material);
+    const user = messages[1]?.content ?? "";
+    expect(user).toContain("Valid cite ids: s1, s2, s3, s4");
+    expect(user).toContain("Any other cite id, including a block id, is rejected");
+    expect(user).toContain("Never use a block id such as b1 in cite");
+  });
 });
 
 describe("model calls", () => {
@@ -288,6 +296,69 @@ describe("model calls", () => {
     expect(dailyNeuronBudget("0")).toBe(0);
     expect(dailyNeuronBudget("12000")).toBe(9000);
     expect(dailyNeuronBudget("not-a-number")).toBe(8000);
+  });
+});
+
+describe("citation repair", () => {
+  it("strips cite ids that are not defined sources when the rest still validates", async () => {
+    const broken = structuredClone(explanation);
+    const firstBlock = broken.sections[0]?.blocks[0];
+    if (!firstBlock || firstBlock.type !== "p") throw new Error("fixture shape changed");
+    firstBlock.runs[0]!.cite = "b999";
+    broken.diagram.nodes[0]!.cite = "b96";
+    const edge = broken.diagram.edges[0];
+    if (edge) edge.cite = "b96";
+
+    const ai = {
+      run: async () => ({ response: JSON.stringify(broken) }),
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.ok).toBe(true);
+    const repairedBlock = result.explanation?.sections[0]?.blocks[0];
+    if (!repairedBlock || repairedBlock.type !== "p") throw new Error("fixture shape changed");
+    expect(repairedBlock.runs[0]?.cite).toBeUndefined();
+    expect(result.explanation?.diagram.nodes[0]?.cite).toBeUndefined();
+    expect(result.explanation?.diagram.edges[0]?.cite).toBeUndefined();
+  });
+
+  it("reports the original issues when the repaired result still fails validation", async () => {
+    const broken = structuredClone(explanation);
+    const firstBlock = broken.sections[0]?.blocks[0];
+    if (!firstBlock || firstBlock.type !== "p") throw new Error("fixture shape changed");
+    firstBlock.runs[0]!.cite = "b999";
+    const firstSection = broken.sections[0];
+    if (!firstSection) throw new Error("fixture shape changed");
+    broken.sections.push(structuredClone(firstSection));
+
+    const ai = {
+      run: async () => ({ response: JSON.stringify(broken) }),
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null);
+    expect(result.ok).toBe(false);
+    expect(result.issues.some((issue) => issue.message.includes("Unknown citation b999"))).toBe(true);
+    expect(result.issues.some((issue) => issue.message.includes("Duplicate section id"))).toBe(true);
+  });
+
+  it("includes the valid cite ids in the repair message on the next attempt", async () => {
+    let sent: Array<{ role: string; content: string }> = [];
+    const ai = {
+      run: async (_model: string, input: { messages: Array<{ role: string; content: string }> }) => {
+        sent = input.messages;
+        return { response: JSON.stringify(explanation) };
+      },
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, {
+      rawText: "{}",
+      issues: [{ path: "sections.0.blocks.0.runs.0.cite", message: "Unknown citation b59" }],
+    });
+
+    expect(result.ok).toBe(true);
+    const repair = sent.at(-1)?.content ?? "";
+    expect(repair).toContain("Valid cite ids: s1, s2, s3, s4");
+    expect(repair).toContain("Any other cite id, including a block id, is rejected");
   });
 });
 

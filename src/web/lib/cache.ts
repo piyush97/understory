@@ -1,9 +1,17 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../../shared/env";
-import { getPublicationVersion, getSiteState, type SiteState } from "../../infrastructure/db";
+import {
+  getPublishedRevisionIdBySlug,
+  getPublicationVersion,
+  getSiteState,
+  listTopics,
+  type SiteState,
+} from "../../infrastructure/db";
 
 const VERSION_TTL_MS = 30_000;
 const SITE_STATE_KEY = "https://site-state.internal/v1";
+const TOPICS_KEY = "https://topics.internal/v1";
+export const ARTICLE_CACHE_SECONDS = 6 * 60 * 60;
 // Workers must not share I/O promises across requests, so only the resolved
 // value is memoized.
 let versionMemo: { value: string; at: number } | null = null;
@@ -21,26 +29,27 @@ function freshSiteState(c: Context<AppEnv>): Promise<SiteState> {
   return getSiteState(c.env.DB, { maxAgeMs: 30_000 });
 }
 
-export async function cachedSiteState(c: Context<AppEnv>): Promise<SiteState> {
-  const existing = c.get("site");
-  if (existing) return existing;
-
+async function cachedJson<T>(
+  c: Context<AppEnv>,
+  keyBase: string,
+  load: () => Promise<T>,
+): Promise<T> {
   if (c.env.ENVIRONMENT !== "production" || typeof caches === "undefined") {
-    return freshSiteState(c);
+    return load();
   }
 
   let key: Request | null = null;
   try {
     const version = await publicationVersion(c);
-    key = new Request(`${SITE_STATE_KEY}?v=${encodeURIComponent(version)}`, { method: "GET" });
+    key = new Request(`${keyBase}?v=${encodeURIComponent(version)}`, { method: "GET" });
     const cache = (caches as unknown as { default: Cache }).default;
     const hit = await cache.match(key);
-    if (hit) return (await hit.json()) as SiteState;
+    if (hit) return (await hit.json()) as T;
   } catch {
     // Cache reads are best effort; fall through to a fresh D1 read.
   }
 
-  const state = await freshSiteState(c);
+  const value = await load();
 
   if (key) {
     try {
@@ -48,7 +57,7 @@ export async function cachedSiteState(c: Context<AppEnv>): Promise<SiteState> {
       const put = cache
         .put(
           key,
-          new Response(JSON.stringify(state), {
+          new Response(JSON.stringify(value), {
             headers: {
               "Content-Type": "application/json",
               "Cache-Control": "max-age=3600",
@@ -62,11 +71,23 @@ export async function cachedSiteState(c: Context<AppEnv>): Promise<SiteState> {
         await put;
       }
     } catch {
-      // A failed write must not fail the request; the state is still returned.
+      // A failed write must not fail the request; the value is still returned.
     }
   }
 
-  return state;
+  return value;
+}
+
+export async function cachedSiteState(c: Context<AppEnv>): Promise<SiteState> {
+  const existing = c.get("site");
+  if (existing) return existing;
+  return cachedJson(c, SITE_STATE_KEY, () => freshSiteState(c));
+}
+
+export type CachedTopic = Awaited<ReturnType<typeof listTopics>>[number];
+
+export async function cachedTopics(c: Context<AppEnv>): Promise<CachedTopic[]> {
+  return cachedJson(c, TOPICS_KEY, () => listTopics(c.env.DB));
 }
 
 async function loadSite(c: Context<AppEnv>, enabled: boolean): Promise<void> {
@@ -78,11 +99,21 @@ async function loadSite(c: Context<AppEnv>, enabled: boolean): Promise<void> {
   }
 }
 
+function baseKeyUrl(c: Context<AppEnv>): URL {
+  const url = new URL(c.req.url);
+  const keyUrl = new URL(url.pathname, url.origin);
+  for (const name of ["topic", "cursor", "limit"]) {
+    const value = url.searchParams.get(name);
+    if (value !== null) keyUrl.searchParams.set(name, value);
+  }
+  return keyUrl;
+}
+
 export async function cachePage(
   c: Context<AppEnv>,
   ttlSeconds: number,
   render: () => Response | Promise<Response>,
-  options: { site?: boolean } = {},
+  options: { site?: boolean; articleSlug?: string } = {},
 ): Promise<Response> {
   const withSite = options.site !== false;
   if (c.env.ENVIRONMENT !== "production") {
@@ -91,26 +122,45 @@ export async function cachePage(
   }
 
   let key: Request;
-  let version: string;
-  try {
-    version = await publicationVersion(c);
-  } catch {
-    await loadSite(c, withSite);
-    return render();
-  }
-
-  try {
-    const url = new URL(c.req.url);
-    const keyUrl = new URL(url.pathname, url.origin);
-    for (const name of ["topic", "cursor", "limit"]) {
-      const value = url.searchParams.get(name);
-      if (value !== null) keyUrl.searchParams.set(name, value);
+  if (options.articleSlug) {
+    let revisionId: string | null;
+    try {
+      revisionId = await getPublishedRevisionIdBySlug(c.env.DB, options.articleSlug);
+    } catch {
+      await loadSite(c, withSite);
+      return render();
     }
-    keyUrl.searchParams.set("__v", version);
-    key = new Request(keyUrl.toString(), { method: "GET" });
-  } catch {
-    await loadSite(c, withSite);
-    return render();
+    if (!revisionId) {
+      // Missing or unpublished slugs must 404 without reading or writing a
+      // cache entry, so a stale page can never outlive an unpublish.
+      await loadSite(c, withSite);
+      return render();
+    }
+    try {
+      const keyUrl = baseKeyUrl(c);
+      keyUrl.searchParams.set("__r", revisionId);
+      key = new Request(keyUrl.toString(), { method: "GET" });
+    } catch {
+      await loadSite(c, withSite);
+      return render();
+    }
+  } else {
+    let version: string;
+    try {
+      version = await publicationVersion(c);
+    } catch {
+      await loadSite(c, withSite);
+      return render();
+    }
+
+    try {
+      const keyUrl = baseKeyUrl(c);
+      keyUrl.searchParams.set("__v", version);
+      key = new Request(keyUrl.toString(), { method: "GET" });
+    } catch {
+      await loadSite(c, withSite);
+      return render();
+    }
   }
 
   try {

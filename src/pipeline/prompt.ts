@@ -4,6 +4,10 @@ import type { SourceSnapshot } from "../domain/source";
 export const PROMPT_VERSION = "explain-1";
 export const SCHEMA_VERSION = "1";
 
+/** Source ids the model may use in a cite. Any other cite value is rejected. */
+export const VALID_CITE_IDS = ["s1", "s2", "s3", "s4"] as const;
+export const VALID_CITE_IDS_TEXT = VALID_CITE_IDS.join(", ");
+
 export type GenerationMaterial = {
   articleTitle: string;
   articleUrl: string;
@@ -59,7 +63,7 @@ Published: ${material.articlePublishedAt}
 Source: ${material.sourceName}
 
 SOURCE EXCERPT
-Blocks are prefixed with an id you can cite in evidenceIds. Claim numbers, quoted phrases, and contested statements must point at a block id or a source url below.
+Blocks are prefixed with a block id (b1, b2, ...) used only in sources[].evidenceIds. Inline runs, diagram nodes, and diagram edges cite sources, not blocks. Valid cite ids: ${VALID_CITE_IDS_TEXT}. Any other cite id, including a block id, is rejected.
 
 ${excerpt || "(The extractor found no usable prose. Report this in caveats and keep claims minimal.)"}
 
@@ -128,7 +132,7 @@ OUTPUT SHAPE
 REQUIREMENTS
 1. sections: 3 to 6. Include one section on the problem and context, one on how the mechanism works, and one on evidence, limits, or operational consequences.
 2. Each section has 2 to 8 blocks. Vary paragraph, list, code, quote, and note where they help.
-3. Inline runs carry text plus at most one of cite, code, strong, em. cite must be a source id such as s1. Do not place markdown inside text.
+3. Inline runs carry text plus at most one of cite, code, strong, em. cite must be one of the valid cite ids: ${VALID_CITE_IDS_TEXT}. Never use a block id such as b1 in cite. Do not place markdown inside text.
 4. diagram: 3 to 7 nodes, 2 to 9 edges. Node and edge ids are kebab-case. A sequence diagram reads top to bottom. Set conceptual to false only when every node and edge appears explicitly in the source.
 5. sources: 2 to 4, starting with s1 for the original article. Only use the allowed source urls. evidenceIds must be block ids from the excerpt.
 6. eli5: 1 to 2 blocks, short sentences, no unexplained jargon. limit is exactly one sentence.

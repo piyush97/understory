@@ -1,12 +1,12 @@
 import type { Context } from "hono";
 import type { AppEnv } from "../../shared/env";
-import { listTopics } from "../../infrastructure/db";
+import { cachedTopics } from "../lib/cache";
 import { Layout } from "../components/layout";
 import { IconArrowRight } from "../components/icons";
 import { plural } from "../lib/format";
 
 export async function renderTopics(c: Context<AppEnv>) {
-  const allTopics = await listTopics(c.env.DB);
+  const allTopics = await cachedTopics(c);
   const topics = allTopics.filter((topic) => topic.count > 0);
 
   return c.render(

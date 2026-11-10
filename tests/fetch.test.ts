@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchArticlePage } from "../src/pipeline/extract";
-import { fetchPublicText, publicHttpUrl } from "../src/shared/fetch";
+import { fetchPublicText, publicHttpUrl, PublicFetchError, retryAfterSeconds } from "../src/shared/fetch";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const unsafe = [
@@ -9,6 +9,21 @@ const unsafe = [
   "http://[::1]/", "http://[::]/", "http://[fc00::1]/", "http://[fe80::1]/", "http://[::ffff:127.0.0.1]/", "http://[::ffff:a00:1]/", "http://[2002:7f00:1::]/", "http://[2001:db8::1]/", "http://[64:ff9b::a00:1]/",
   "http://user:secret@example.com/", "https://example.com:8080/",
 ];
+describe("public fetch status errors", () => {
+  it("keeps the status and Retry-After of a refused response", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("slow down", { status: 429, headers: { "retry-after": "90" } })));
+    const error = await fetchPublicText("https://example.com", { maxBytes: 100 }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PublicFetchError);
+    expect(error).toMatchObject({ status: 429, retryAfterSeconds: 90, message: "Public fetch responded 429" });
+  });
+  it("parses Retry-After seconds and HTTP dates", () => {
+    const now = Date.parse("2026-11-09T12:00:00Z");
+    expect(retryAfterSeconds("30", now)).toBe(30);
+    expect(retryAfterSeconds("Mon, 09 Nov 2026 12:05:00 GMT", now)).toBe(300);
+    expect(retryAfterSeconds("soon", now)).toBeNull();
+    expect(retryAfterSeconds(null, now)).toBeNull();
+  });
+});
 describe("public fetch boundaries", () => {
   it.each([
     "192.0.78.24", "203.0.178.191", "198.51.99.1",
