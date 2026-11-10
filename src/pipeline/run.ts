@@ -56,7 +56,8 @@ const ESTIMATED_NEURONS_PER_ATTEMPT = 500;
 const MAX_NEW_ARTICLES_PER_DISCOVERY = 6;
 const MAX_AGE_DAYS = 4;
 const MIN_SOURCE_WORDS = 220;
-const DISCOVERY_INTERVAL_MINUTES = 30;
+const DISCOVERY_START_HOUR_UTC = 0;
+const DISCOVERY_START_MINUTE_UTC = 15;
 
 export type RunResult = {
   ok: boolean;
@@ -524,9 +525,16 @@ export async function handleQueueBatch(
 }
 
 export async function runScheduled(env: Bindings, now = new Date()): Promise<void> {
+  const boundaryMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    DISCOVERY_START_HOUR_UTC,
+    DISCOVERY_START_MINUTE_UTC,
+  );
   const last = await getMeta(env.DB, "last_discovery_enqueued_at");
-  const lastMs = last ? Date.parse(last) : 0;
-  const due = !Number.isFinite(lastMs) || now.getTime() - lastMs >= DISCOVERY_INTERVAL_MINUTES * 60_000;
+  const lastMs = last ? Date.parse(last) : Number.NaN;
+  const due = now.getTime() >= boundaryMs && (!Number.isFinite(lastMs) || lastMs < boundaryMs);
 
   if (due) {
     await env.PIPELINE_QUEUE.send({ kind: "discover", reason: "cron" });
