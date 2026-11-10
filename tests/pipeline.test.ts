@@ -103,6 +103,12 @@ function existingRevision(status: string) {
   seedRevision(store, status);
   store.sqlite.prepare("UPDATE explanation_revisions SET prompt_version = ?, schema_version = ?").run(PROMPT_VERSION, SCHEMA_VERSION);
 }
+function discoverySends() {
+  return (env.PIPELINE_QUEUE.send as ReturnType<typeof vi.fn>).mock.calls.filter(([message]) => message?.kind === "discover");
+}
+function lastDiscoveryEnqueuedAt() {
+  return store.sqlite.prepare("SELECT value FROM meta WHERE key = 'last_discovery_enqueued_at'").get()?.value;
+}
 
 describe("selection gate", () => {
   const config = JSON.parse(readFileSync(new URL("../wrangler.pipeline.jsonc", import.meta.url), "utf8"));
@@ -717,11 +723,77 @@ describe("pipeline consistency", () => {
     expect(mocks.generate).toHaveBeenCalledTimes(1);
     expect(store.sqlite.prepare("SELECT used_neurons, reserved_neurons FROM ai_budget").get()).toMatchObject({ used_neurons: 500, reserved_neurons: 0 });
   });
-  it("spaces discovery across cron runs", async () => {
-    const now = new Date("2026-10-20T12:00:00.000Z");
-    store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run(new Date(now.getTime() - 11 * 60_000).toISOString());
+  it("does not enqueue discovery before the daily 00:15 UTC boundary", async () => {
+    const now = new Date("2026-10-20T00:14:59.999Z");
     await runScheduled(env, now);
-    expect((env.PIPELINE_QUEUE.send as ReturnType<typeof vi.fn>).mock.calls).not.toContainEqual([{ kind: "discover", reason: "cron" }]);
+    expect(discoverySends()).toHaveLength(0);
+  });
+  it("enqueues the daily discovery batch at 00:15 UTC", async () => {
+    const now = new Date("2026-10-20T00:15:00.000Z");
+    store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run("2026-10-19T00:15:00.000Z");
+
+    await runScheduled(env, now);
+
+    expect(discoverySends()).toEqual([[{ kind: "discover", reason: "cron" }]]);
+    expect(lastDiscoveryEnqueuedAt()).toBe(now.toISOString());
+  });
+  it("does not rediscover later the same UTC day", async () => {
+    store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run("2026-10-20T00:15:00.000Z");
+
+    await runScheduled(env, new Date("2026-10-20T23:45:00.000Z"));
+
+    expect(discoverySends()).toHaveLength(0);
+    expect(lastDiscoveryEnqueuedAt()).toBe("2026-10-20T00:15:00.000Z");
+  });
+  it("enqueues again after the next UTC day's 00:15 boundary", async () => {
+    const now = new Date("2026-10-21T00:15:00.000Z");
+    store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run("2026-10-20T00:15:00.000Z");
+
+    await runScheduled(env, now);
+
+    expect(discoverySends()).toHaveLength(1);
+    expect(lastDiscoveryEnqueuedAt()).toBe(now.toISOString());
+  });
+  it("catches up on the first eligible tick after a missed 00:15 boundary", async () => {
+    store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run("2026-10-19T00:15:00.000Z");
+    const first = new Date("2026-10-20T06:30:00.000Z");
+
+    await runScheduled(env, first);
+
+    expect(discoverySends()).toEqual([[{ kind: "discover", reason: "cron" }]]);
+    expect(lastDiscoveryEnqueuedAt()).toBe(first.toISOString());
+    await runScheduled(env, new Date("2026-10-20T06:45:00.000Z"));
+    expect(discoverySends()).toHaveLength(1);
+  });
+  it.each([
+    ["missing", null],
+    ["invalid", "not-a-date"],
+  ])("starts the daily batch when the last enqueue timestamp is %s", async (_label, value) => {
+    const now = new Date("2026-10-20T00:15:00.000Z");
+    if (value !== null) {
+      store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run(value);
+    }
+
+    await runScheduled(env, now);
+
+    expect(discoverySends()).toHaveLength(1);
+    expect(lastDiscoveryEnqueuedAt()).toBe(now.toISOString());
+  });
+  it("keeps recovery sweeps running when discovery is not due", async () => {
+    const now = new Date("2026-10-20T06:30:00.000Z");
+    store.sqlite.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('last_discovery_enqueued_at', ?)").run("2026-10-20T00:15:00.000Z");
+    await generateJob();
+    store.sqlite.exec("UPDATE jobs SET state = 'running', attempts = 5, lease_expires_at = '2000-01-01'");
+    store.sqlite.prepare("INSERT INTO ai_budget (day, reserved_neurons, used_neurons) VALUES (?, 500, 1000)")
+      .run(now.toISOString().slice(0, 10));
+
+    await runScheduled(env, now);
+
+    expect(discoverySends()).toHaveLength(0);
+    expect(store.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()?.state).toBe("failed");
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()?.status).toBe("failed");
+    expect(store.sqlite.prepare("SELECT used_neurons, reserved_neurons FROM ai_budget").get())
+      .toEqual({ used_neurons: 1500, reserved_neurons: 0 });
   });
   it("retires killed jobs and charges their orphaned budget during the scheduled sweep", async () => {
     await generateJob();

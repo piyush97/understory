@@ -99,10 +99,10 @@ npx playwright install chromium
 
 ## How a post becomes a sheet
 
-1. The cron trigger enqueues a discovery message every 15 minutes. Discovery fetches the public listing, parses recent entries, creates source rows, inserts new articles, and queues extract jobs.
+1. The quarter-hour cron starts one discovery batch per UTC day at 00:15. Discovery fetches the public listing, parses recent entries, creates source rows, inserts new articles, and queues extract jobs. Later quarter-hour ticks keep sweeping for retries and recovery instead of rediscovering.
 2. An extract job fetches one article, pulls readable blocks with `HTMLRewriter`, records a content-hashed snapshot, and queues a generate job.
 3. A generate job reserves an estimated slice of the daily neuron budget, asks Workers AI for strict JSON, validates it structurally and semantically, and writes a draft revision.
-4. With `AUTO_PUBLISH="true"` (enabled in the production pipeline config), a newly generated valid revision publishes in the same transaction that creates it, with an automated-validation audit record. Existing drafts are never auto-approved. Set `AUTO_PUBLISH="false"` and redeploy the pipeline to hold new drafts for manual review. Publication updates the article and increments the publication version; failed validation stays unpublished.
+4. With `AUTO_PUBLISH="true"` (enabled in the production pipeline config), a newly generated valid revision publishes in the same transaction that creates it, with an automated-validation audit record. Articles publish as they finish processing; the daily batch starts discovery rather than holding everything for a simultaneous release. Existing drafts are never auto-approved. Set `AUTO_PUBLISH="false"` and redeploy the pipeline to hold new drafts for manual review. Publication updates the article and increments the publication version; failed validation stays unpublished.
 5. Public pages read only published revisions. A reader request never calls a model.
 
 Before generation, the extract job scores the source on mechanism evidence and checks for near-duplicate stories from the same publisher (14-day window, earliest story survives). With `SELECTION_ENFORCE="true"`, low-scoring or duplicate posts are recorded as skipped and never reach the model. The checked-in pipeline config enables enforcement after a reviewed read-only audit of the latest 500 articles on 2026-11-03 (377 scored, 37 low-score and 2 duplicate candidates; false multipart/vendor clusters removed). This was not a full-corpus or human fact-check. Deploying the pipeline is still required to activate the setting in production. Nothing is unpublished, hidden, or rewritten automatically.
@@ -198,9 +198,11 @@ npx wrangler secret put ADMIN_TOKEN --config wrangler.pipeline.jsonc
 
 If your URL changed during initial deployment, update both `SITE_URL` values and
 redeploy. The pipeline deployment activates the existing `*/15 * * * *` cron
-in UTC (the next quarter-hour). To remove automatic discovery, remove its
-`triggers.crons` entry and redeploy the pipeline. A zero neuron budget pauses
-generation, not discovery.
+in UTC. One discovery/publishing batch begins each day at 00:15 UTC; the other
+quarter-hour ticks keep running recovery sweeps, and retries may finish later.
+Keep the cron in place for those sweeps. To disable discovery without stopping
+recovery, leave the trigger and change the schedule gate in the pipeline code.
+A zero neuron budget pauses generation, not discovery.
 
 Optional hardening: put Cloudflare Access in front of `/admin`, set the
 `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` values in `wrangler.jsonc` (the
