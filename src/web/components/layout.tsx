@@ -3,7 +3,7 @@ import type { SiteState } from "../../infrastructure/db";
 import { issueNumber } from "../lib/format";
 import { IconArrowUpRight } from "./icons";
 
-export type ActiveNav = "index" | "topics" | "sources" | "bookmarks" | "about" | null;
+export type ActiveNav = "index" | "topics" | "sources" | "bookmarks" | "about" | "search" | null;
 
 type LayoutProps = {
   children: Child;
@@ -155,6 +155,7 @@ export function Layout({
               <a href="/about">How it works</a>
               <a href="/about#editorial">Editorial policy</a>
               <a href="/sources">Sources</a>
+        <a href="/search">Search</a>
             </nav>
             <p class="site-footer__stamp">Set in Barlow Condensed, Source Serif 4, and Spline Sans Mono.</p>
           </div>

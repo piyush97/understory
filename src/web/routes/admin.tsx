@@ -12,10 +12,18 @@ import {
   listReviewQueue,
   rejectRevision,
 } from "../../infrastructure/db";
+import {
+  createApiKey,
+  listApiKeys,
+  listApiOrgSummaries,
+  revokeApiKey,
+  type MintedApiKey,
+} from "../../infrastructure/api";
 import { Layout } from "../components/layout";
 import { Blocks } from "../components/blocks";
 import { DiagramPlate } from "../components/diagram";
 import { validateExplanation } from "../../domain/explanation";
+import { billingPeriodStart } from "../lib/api-auth";
 import { parseExplanation, parseProvenance } from "../lib/content";
 import { relativeDate } from "../lib/format";
 import { IconArrowRight, IconCheck, IconMinus, IconArrowUpRight } from "../components/icons";
@@ -64,19 +72,35 @@ async function safeEqual(a: string, b: string): Promise<boolean> {
   return diff === 0;
 }
 
-export async function renderAdmin(c: Context<AppEnv>) {
+type AdminNotice = { kind: "ok" | "error"; message: string };
+
+export async function renderAdmin(
+  c: Context<AppEnv>,
+  options: { minted?: MintedApiKey; notice?: AdminNotice } = {},
+) {
   const auth = await authorize(c);
   if (!auth.ok) return renderLogin(c, auth.missingToken);
 
-  const [queue, skipped, pipeline] = await Promise.all([
+  const now = new Date();
+  const periodStart = billingPeriodStart(now);
+  const [queue, skipped, pipeline, apiOrgs, apiKeys] = await Promise.all([
     listReviewQueue(c.env.DB),
     listRecentSkippedArticles(c.env.DB),
     getPipelineStatus(c.env.DB).catch(() => null),
+    listApiOrgSummaries(c.env.DB, periodStart).catch(() => null),
+    listApiKeys(c.env.DB).catch(() => null),
   ]);
   const budget = dailyNeuronBudget(c.env.DAILY_NEURON_BUDGET);
   const site = c.get("site");
   const queued = c.req.query("queued") === "1";
   const rejected = c.req.query("rejected") === "1";
+  const notice =
+    options.notice ??
+    (c.req.query("revoked") === "1"
+      ? { kind: "ok" as const, message: "Key revoked. Requests using it are rejected immediately." }
+      : c.req.query("revoked") === "0"
+        ? { kind: "error" as const, message: "That key was already revoked or does not exist." }
+        : undefined);
 
   return c.render(
     <Layout
@@ -171,6 +195,215 @@ export async function renderAdmin(c: Context<AppEnv>) {
               ) : <p class="admin-help__fineprint">No failed or deferred jobs.</p>}
             </>
           ) : <p>Pipeline status unavailable. Refresh this page to retry; the review queue remains available.</p>}
+        </section>
+
+        <section class="admin-queue admin-api" aria-labelledby="api-title">
+          <div class="section-head">
+            <h2 id="api-title">API access</h2>
+            <span class="section-head__meta">
+              Current period from {periodStart.slice(0, 10)}
+            </span>
+          </div>
+
+          {notice ? (
+            <p
+              class={`admin-flash${notice.kind === "error" ? " admin-flash--error" : ""}`}
+              role="status"
+            >
+              {notice.message}
+            </p>
+          ) : null}
+
+          {options.minted ? (
+            <div class="admin-flash" role="status" aria-live="polite">
+              <strong>
+                New key for {options.minted.orgId} ({options.minted.name}).
+              </strong>
+              <p>
+                This is the only time the key is shown. Copy it into your secret manager now;
+                Understory stores only a hash and cannot show it again.
+              </p>
+              <p>
+                <code class="mono">{options.minted.plaintext}</code>
+              </p>
+            </div>
+          ) : null}
+
+          {apiOrgs === null ? (
+            <p>API metering is unavailable. Refresh this page to retry.</p>
+          ) : (
+            <>
+              <div class="admin-stats">
+                <div>
+                  <span class="field-label">Organizations</span>
+                  <strong>{apiOrgs.length}</strong>
+                </div>
+                <div>
+                  <span class="field-label">Active keys</span>
+                  <strong>{apiOrgs.reduce((sum, org) => sum + org.activeKeyCount, 0)}</strong>
+                </div>
+                <div>
+                  <span class="field-label">Requests this period</span>
+                  <strong>{apiOrgs.reduce((sum, org) => sum + org.used, 0).toLocaleString("en-US")}</strong>
+                </div>
+              </div>
+
+              <h3>Organizations</h3>
+              {apiOrgs.length === 0 ? (
+                <p class="admin-help__fineprint">
+                  No organizations yet. Mint the first key below to create one.
+                </p>
+              ) : (
+                <div class="admin-table" role="table" aria-label="API organizations">
+                  <div class="admin-table__head" role="row">
+                    <span role="columnheader">Organization</span>
+                    <span role="columnheader">Status</span>
+                    <span role="columnheader">Monthly limit</span>
+                    <span role="columnheader">Used this period</span>
+                    <span role="columnheader">Keys</span>
+                  </div>
+                  {apiOrgs.map((org) => {
+                    const limit = org.limitCount ?? org.requestLimit;
+                    return (
+                      <div class="admin-table__row" role="row">
+                        <span role="cell" class="admin-table__title">
+                          {org.name}
+                          <br />
+                          <span class="mono admin-help__fineprint">{org.id}</span>
+                        </span>
+                        <span role="cell">
+                          <span class={`status-tag status-tag--${org.status}`}>{org.status}</span>
+                        </span>
+                        <span role="cell">{org.requestLimit.toLocaleString("en-US")}</span>
+                        <span role="cell">
+                          {org.used.toLocaleString("en-US")} of {limit.toLocaleString("en-US")}
+                          {" "}
+                          <span class="admin-help__fineprint">
+                            ({Math.max(0, limit - org.used).toLocaleString("en-US")} remaining)
+                          </span>
+                        </span>
+                        <span role="cell">
+                          {org.activeKeyCount} active of {org.keyCount}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <h3>Keys</h3>
+              {apiKeys === null ? (
+                <p class="admin-help__fineprint">Key list unavailable. Refresh this page to retry.</p>
+              ) : apiKeys.length === 0 ? (
+                <p class="admin-help__fineprint">No keys yet. Mint one below.</p>
+              ) : (
+                <div class="admin-table" role="table" aria-label="API keys">
+                  <div class="admin-table__head" role="row">
+                    <span role="columnheader">Key</span>
+                    <span role="columnheader">Organization</span>
+                    <span role="columnheader">Created</span>
+                    <span role="columnheader">State</span>
+                    <span role="columnheader" />
+                  </div>
+                  {apiKeys.map((key) => (
+                    <div class="admin-table__row" role="row">
+                      <span role="cell" class="admin-table__title">
+                        <span class="mono">{key.prefix}…</span>
+                        <br />
+                        <span class="admin-help__fineprint">{key.name}</span>
+                      </span>
+                      <span role="cell">{key.orgName}</span>
+                      <span role="cell">
+                        <time dateTime={key.createdAt}>{relativeDate(key.createdAt)}</time>
+                      </span>
+                      <span role="cell">
+                        {key.revokedAt === null ? (
+                          <span class="status-tag status-tag--active">active</span>
+                        ) : (
+                          <span class="status-tag status-tag--revoked">
+                            revoked <time dateTime={key.revokedAt}>{relativeDate(key.revokedAt)}</time>
+                          </span>
+                        )}
+                      </span>
+                      <span role="cell" class="admin-table__action">
+                        {key.revokedAt === null ? (
+                          <form method="post" action="/admin/discover">
+                            <input type="hidden" name="action" value="revoke-key" />
+                            <input type="hidden" name="key_id" value={key.id} />
+                            <button
+                              class="button button--quiet"
+                              type="submit"
+                              aria-label={`Revoke key ${key.prefix} for ${key.orgName}`}
+                            >
+                              Revoke
+                            </button>
+                          </form>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <h3>Create an organization and mint a key</h3>
+              <p class="admin-help__fineprint">
+                The plaintext key is shown once on the response to this form. It is never stored
+                or logged. New organizations start on a 14-day trial; existing organizations keep
+                their status and only the name and monthly limit are updated.
+              </p>
+              <form class="admin-action-form admin-api-form" method="post" action="/admin/discover">
+                <input type="hidden" name="action" value="mint-key" />
+                <div>
+                  <label for="api-org-id">Organization ID</label>
+                  <input
+                    id="api-org-id"
+                    name="org_id"
+                    required
+                    minlength={2}
+                    maxlength={64}
+                    pattern="[A-Za-z0-9][A-Za-z0-9_-]{1,63}"
+                    autocomplete="off"
+                  />
+                </div>
+                <div>
+                  <label for="api-org-name">Organization name</label>
+                  <input
+                    id="api-org-name"
+                    name="org_name"
+                    required
+                    maxlength={120}
+                    autocomplete="organization"
+                  />
+                </div>
+                <div>
+                  <label for="api-request-limit">Monthly request limit</label>
+                  <input
+                    id="api-request-limit"
+                    name="request_limit"
+                    type="number"
+                    min={1}
+                    max={10_000_000}
+                    step={1}
+                    value="1000"
+                    required
+                  />
+                </div>
+                <div>
+                  <label for="api-key-name">Key label</label>
+                  <input
+                    id="api-key-name"
+                    name="key_name"
+                    required
+                    maxlength={64}
+                    value="primary"
+                  />
+                </div>
+                <button class="button button--solid" type="submit">
+                  Mint key <IconArrowRight size={14} />
+                </button>
+              </form>
+            </>
+          )}
         </section>
 
         <section class="admin-queue" aria-labelledby="queue-title">
@@ -367,8 +600,60 @@ export function handleLogout(c: Context<AppEnv>) {
 export async function handleDiscover(c: Context<AppEnv>) {
   const auth = await authorize(c);
   if (!auth.ok) return c.text("Unauthorized", 401);
+  const body = await c.req.parseBody();
+  const action = typeof body.action === "string" ? body.action : "";
+  if (action === "mint-key") return mintApiKey(c, body);
+  if (action === "revoke-key") return revokeKey(c, body);
   await c.env.PIPELINE_QUEUE.send({ kind: "discover", reason: "admin" });
   return c.redirect("/admin?queued=1");
+}
+
+/**
+ * API key actions share the editorial action endpoint so they inherit the
+ * admin session and same-origin POST check without a second auth path.
+ */
+async function mintApiKey(c: Context<AppEnv>, body: Record<string, string | File>) {
+  const orgId = typeof body.org_id === "string" ? body.org_id.trim().toLowerCase() : "";
+  const orgName = typeof body.org_name === "string" ? body.org_name.trim() : "";
+  const keyName = typeof body.key_name === "string" ? body.key_name.trim() : "";
+  const limitRaw = typeof body.request_limit === "string" ? body.request_limit.trim() : "";
+  const requestLimit = Number.parseInt(limitRaw, 10);
+
+  const invalid = (message: string) =>
+    renderAdmin(c, { notice: { kind: "error", message } });
+
+  if (!/^[a-z0-9][a-z0-9_-]{1,63}$/.test(orgId)) {
+    return invalid("Organization ID must be 2-64 letters, digits, dashes or underscores.");
+  }
+  if (orgName.length < 1 || orgName.length > 120) {
+    return invalid("Organization name must be 1-120 characters.");
+  }
+  if (keyName.length < 1 || keyName.length > 64) {
+    return invalid("Key label must be 1-64 characters.");
+  }
+  if (!/^\d+$/.test(limitRaw) || requestLimit < 1 || requestLimit > 10_000_000) {
+    return invalid("Monthly request limit must be a whole number between 1 and 10,000,000.");
+  }
+
+  const minted = await createApiKey(c.env.DB, {
+    orgId,
+    orgName,
+    requestLimit,
+    keyName,
+    now: new Date(),
+  });
+  return renderAdmin(c, { minted });
+}
+
+async function revokeKey(c: Context<AppEnv>, body: Record<string, string | File>) {
+  const keyId = typeof body.key_id === "string" ? body.key_id.trim() : "";
+  if (!keyId) {
+    return renderAdmin(c, {
+      notice: { kind: "error", message: "Choose a key to revoke." },
+    });
+  }
+  const revoked = await revokeApiKey(c.env.DB, keyId, new Date());
+  return c.redirect(`/admin?revoked=${revoked ? 1 : 0}`);
 }
 
 export async function renderReview(c: Context<AppEnv>) {

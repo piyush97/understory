@@ -102,7 +102,7 @@ async function loadSite(c: Context<AppEnv>, enabled: boolean): Promise<void> {
 function baseKeyUrl(c: Context<AppEnv>): URL {
   const url = new URL(c.req.url);
   const keyUrl = new URL(url.pathname, url.origin);
-  for (const name of ["topic", "cursor", "limit"]) {
+  for (const name of ["topic", "cursor", "limit", "q"]) {
     const value = url.searchParams.get(name);
     if (value !== null) keyUrl.searchParams.set(name, value);
   }

@@ -10,6 +10,7 @@ import { renderTopics } from "./routes/topics";
 import { renderSources } from "./routes/sources";
 import { renderAbout } from "./routes/about";
 import { renderBookmarks } from "./routes/bookmarks";
+import { renderSearch } from "./routes/search";
 import {
   handleApprove,
   handleDiscover,
@@ -129,6 +130,7 @@ app.get("/topics", (c) => cachePage(c, 900, () => renderTopics(c)));
 app.get("/sources", (c) => cachePage(c, 900, () => renderSources(c)));
 app.get("/about", (c) => cachePage(c, 900, () => renderAbout(c)));
 app.get("/bookmarks", (c) => cachePage(c, 900, () => renderBookmarks(c)));
+app.get("/search", (c) => cachePage(c, 60, () => renderSearch(c)));
 
 app.get("/api/articles", (c) => cachePage(c, 60, () => renderApiArticles(c), { site: false }));
 app.get("/api/articles/:slug", (c) => cachePage(c, 300, () => renderApiArticle(c), { site: false }));

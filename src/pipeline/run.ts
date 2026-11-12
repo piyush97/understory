@@ -48,7 +48,7 @@ import { bool, dailyNeuronBudget, type Bindings, type QueueMessage } from "../sh
 import { fetchPublicText, PublicFetchError } from "../shared/fetch";
 import { pingIndexNow } from "../shared/indexnow";
 import { parseDiscoveryHtml } from "./discovery";
-import { extractArticle, fetchArticlePage, toSnapshot } from "./extract";
+import { extractArticle, fetchArticlePage, toSnapshot, type ExtractedArticle, type FetchedPage } from "./extract";
 import { attemptGeneration, neuronsFromUsage } from "./generate";
 import { PROMPT_VERSION, SCHEMA_VERSION, type GenerationMaterial } from "./prompt";
 
@@ -56,6 +56,7 @@ const ESTIMATED_NEURONS_PER_ATTEMPT = 500;
 const MAX_NEW_ARTICLES_PER_DISCOVERY = 6;
 const MAX_AGE_DAYS = 4;
 const MIN_SOURCE_WORDS = 220;
+const FEED_EXTRACTOR_VERSION = "feed-description-1";
 const DISCOVERY_START_HOUR_UTC = 0;
 const DISCOVERY_START_MINUTE_UTC = 15;
 
@@ -194,11 +195,35 @@ export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult>
 
   await setArticleStatus(env.DB, article.id, "extracting", null, job);
   try {
-    const fetched = await fetchArticlePage(
-      article.canonicalUrl,
-      `UnderstoryBot/0.1 (+${env.SITE_URL}/about)`,
-    );
-    const extracted = await extractArticle(fetched.html, fetched.finalUrl);
+    let fetched: FetchedPage;
+    let extracted: ExtractedArticle;
+    let extractorVersion: string | undefined;
+    try {
+      fetched = await fetchArticlePage(
+        article.canonicalUrl,
+        `UnderstoryBot/0.1 (+${env.SITE_URL}/about)`,
+      );
+      extracted = await extractArticle(fetched.html, fetched.finalUrl);
+    } catch (error) {
+      // Some sites block our crawler but their discovery text is already stored.
+      // A 403 is permanent, so use that text as a lower-fidelity snapshot when it
+      // clears the same word floor; other statuses keep their existing handling.
+      if (!(error instanceof PublicFetchError && error.status === 403)) throw error;
+      const text = [article.summary, article.dek].filter(Boolean).join("\n\n").trim().slice(0, 12_000);
+      const wordCount = text.split(/\s+/).filter(Boolean).length;
+      if (wordCount < MIN_SOURCE_WORDS) throw error;
+      fetched = { html: "", finalUrl: article.canonicalUrl, status: 403 };
+      extracted = {
+        title: article.originalTitle,
+        author: article.author,
+        summary: article.summary,
+        canonicalUrl: article.canonicalUrl,
+        blocks: [{ id: "b1", kind: "paragraph", text, sourceUrl: article.canonicalUrl, headingPath: [] }],
+        wordCount,
+        links: [],
+      };
+      extractorVersion = FEED_EXTRACTOR_VERSION;
+    }
     if (extracted.wordCount < MIN_SOURCE_WORDS) {
       const reason = `Source page yielded ${extracted.wordCount} words, below the ${MIN_SOURCE_WORDS}-word floor.`;
       const skipped = await setArticleStatus(
@@ -213,7 +238,7 @@ export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult>
       return { ok: true, detail: `Skipped thin source (${extracted.wordCount} words).` };
     }
 
-    const snapshot = toSnapshot(article.id, fetched.finalUrl, new Date().toISOString(), extracted);
+    const snapshot = toSnapshot(article.id, fetched.finalUrl, new Date().toISOString(), extracted, extractorVersion);
     const parsed = sourceSnapshotSchema.safeParse(snapshot);
     if (!parsed.success) {
       throw new Error(`Snapshot failed validation: ${parsed.error.issues[0]?.message ?? "unknown"}`);
@@ -322,7 +347,8 @@ export async function runExtractJob(env: Bindings, job: Job): Promise<RunResult>
 }
 
 export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult> {
-  if (!env.AI) return { ok: false, detail: "Workers AI binding is not configured." };
+  // AI_STUB fabricates the model response for local dev; it never needs the binding.
+  if (!env.AI && !bool(env.AI_STUB)) return { ok: false, detail: "Workers AI binding is not configured." };
   if (!job.articleId) return { ok: false, detail: "Generate job has no article." };
 
   const article = await getArticleRow(env.DB, job.articleId);
@@ -404,7 +430,8 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
     }
 
     try {
-      generation = await attemptGeneration(env.AI, model, material, previous);
+      // The early return above guarantees a binding unless AI_STUB is set.
+      generation = await attemptGeneration(env.AI as Ai, model, material, previous, env);
     } catch (error) {
       // A transport or binding failure should not consume the day's budget.
       await releaseBudgetReservation(env.DB, day, ESTIMATED_NEURONS_PER_ATTEMPT);

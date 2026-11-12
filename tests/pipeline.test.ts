@@ -96,8 +96,9 @@ function beforeStatement(match: string, effect: () => void) {
   });
 }
 function duplicateSurvivor() {
+  const publishedAt = new Date(Date.now() - 86_400_000).toISOString();
   store.sqlite.exec(`INSERT INTO articles (id, source_id, canonical_url, original_title, published_at, discovered_at, slug, status)
-    VALUES ('survivor', 'source', 'https://example.com/old', 'Introducing Widget Search Index', '2026-10-28T00:00:00.000Z', '2026-10-28T00:00:00.000Z', 'old-widget', 'published')`);
+    VALUES ('survivor', 'source', 'https://example.com/old', 'Introducing Widget Search Index', '${publishedAt}', '2026-10-28T00:00:00.000Z', 'old-widget', 'published')`);
 }
 function existingRevision(status: string) {
   seedRevision(store, status);
@@ -276,6 +277,47 @@ describe("selection gate", () => {
     expect(store.sqlite.prepare("SELECT state FROM jobs WHERE id = 'job'").get()).toEqual({ state: "failed" });
     expect(store.sqlite.prepare("SELECT status, last_error FROM articles WHERE id = 'article'").get())
       .toEqual({ status: "failed", last_error: "Public fetch responded 403" });
+  });
+
+  it("uses stored discovery text when the page returns 403", async () => {
+    await extractJob("Blocked", "https://example.com/blocked", 900, [{ kind: "paragraph", text: textWords(900) }]);
+    store.sqlite.prepare("UPDATE articles SET summary = ? WHERE id = 'article'").run(textWords(240));
+    mocks.fetchPage.mockRejectedValue(new PublicFetchError(403));
+    mocks.snapshot.mockReturnValue(snapshotFor([{ kind: "paragraph", text: textWords(240) }], 240, "https://example.com/blocked"));
+
+    const result = await processJob(env, "job");
+
+    expect(result.ok).toBe(true);
+    expect(mocks.extract).not.toHaveBeenCalled();
+    expect(mocks.snapshot).toHaveBeenCalledWith("article", "https://example.com/blocked", expect.any(String), expect.objectContaining({ wordCount: 240 }), "feed-description-1");
+    expect(store.sqlite.prepare("SELECT status, last_error FROM articles WHERE id = 'article'").get())
+      .toEqual({ status: "generating", last_error: null });
+    expect(store.sqlite.prepare("SELECT count(*) AS n FROM jobs WHERE kind = 'generate'").get()?.n).toBe(1);
+    expect(env.PIPELINE_QUEUE.send).toHaveBeenCalledOnce();
+  });
+
+  it("still fails a 403 source whose stored text is below the floor", async () => {
+    await extractJob("Blocked", "https://example.com/blocked", 900, [{ kind: "paragraph", text: textWords(900) }]);
+    store.sqlite.prepare("UPDATE articles SET summary = ? WHERE id = 'article'").run(textWords(219));
+    mocks.fetchPage.mockRejectedValue(new PublicFetchError(403));
+
+    expect((await processJob(env, "job")).ok).toBe(false);
+
+    expect(store.sqlite.prepare("SELECT status, last_error FROM articles WHERE id = 'article'").get())
+      .toEqual({ status: "failed", last_error: "Public fetch responded 403" });
+    expect(mocks.snapshot).not.toHaveBeenCalled();
+    expect(store.sqlite.prepare("SELECT count(*) AS n FROM jobs WHERE kind = 'generate'").get()?.n).toBe(0);
+  });
+
+  it.each([401, 404, 410])("still fails a %i source even when stored text exists", async (status) => {
+    await extractJob("Blocked", "https://example.com/blocked", 900, [{ kind: "paragraph", text: textWords(900) }]);
+    store.sqlite.prepare("UPDATE articles SET summary = ? WHERE id = 'article'").run(textWords(240));
+    mocks.fetchPage.mockRejectedValue(new PublicFetchError(status));
+
+    expect((await processJob(env, "job")).ok).toBe(false);
+
+    expect(store.sqlite.prepare("SELECT status FROM articles WHERE id = 'article'").get()).toEqual({ status: "failed" });
+    expect(mocks.snapshot).not.toHaveBeenCalled();
   });
 
   it("scores a source at the 220-word floor instead of treating it as thin", async () => {

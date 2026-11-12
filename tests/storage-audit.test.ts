@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { getSnapshotStorageReport } from "../src/infrastructure/db";
 import {
@@ -5,6 +6,7 @@ import {
   parseStorageAuditArgs,
   type StorageAuditArgs,
 } from "../scripts/storage-audit";
+import { formatRetention, getRetentionReport, parseRetentionArgs } from "../scripts/retention";
 import { sqliteDb } from "./helpers/sqlite";
 
 const NOW = new Date("2026-11-03T12:00:00.000Z");
@@ -45,20 +47,23 @@ function insertSnapshot(
 
 function insertRevision(
   db: ReturnType<typeof sqliteDb>,
-  input: { id: string; articleId: string; snapshotId: string; status: string },
+  input: { id: string; articleId: string; snapshotId: string; status: string; createdAt?: string },
 ) {
   db.sqlite.prepare(
     `INSERT INTO explanation_revisions
-      (id, article_id, snapshot_id, status, content_json, provenance_json, model_id, prompt_version, schema_version)
-     VALUES (?, ?, ?, ?, '{}', '{}', 'model', 'prompt', 'schema')`,
-  ).run(input.id, input.articleId, input.snapshotId, input.status);
+      (id, article_id, snapshot_id, status, content_json, provenance_json, model_id, prompt_version, schema_version, created_at)
+     VALUES (?, ?, ?, ?, '{}', '{}', 'model', 'prompt', 'schema', ?)`,
+  ).run(input.id, input.articleId, input.snapshotId, input.status, input.createdAt ?? daysAgo(1));
 }
 
-function insertJob(db: ReturnType<typeof sqliteDb>, input: { id: string; articleId: string; state: string }) {
+function insertJob(
+  db: ReturnType<typeof sqliteDb>,
+  input: { id: string; articleId: string; state: string; updatedAt?: string },
+) {
   db.sqlite.prepare(
-    `INSERT INTO jobs (id, kind, article_id, state, idempotency_key, next_run_at)
-     VALUES (?, 'extract', ?, ?, ?, '2026-01-01T00:00:00.000Z')`,
-  ).run(input.id, input.articleId, input.state, input.id);
+    `INSERT INTO jobs (id, kind, article_id, state, idempotency_key, next_run_at, updated_at)
+     VALUES (?, 'extract', ?, ?, ?, '2026-01-01T00:00:00.000Z', ?)`,
+  ).run(input.id, input.articleId, input.state, input.id, input.updatedAt ?? daysAgo(1));
 }
 
 function daysAgo(days: number, extraMs = 0) {
@@ -312,5 +317,160 @@ describe("storage audit output", () => {
     expect(human).toContain("Snapshots: 2 total");
     expect(human).toContain("old");
     expect(human).toMatch(/not total D1 database size/i);
+  });
+});
+
+async function retention(db: ReturnType<typeof sqliteDb>, limit = 20, days = 30) {
+  return getRetentionReport(db.db, { days, limit, now: NOW });
+}
+
+describe("retention arguments", () => {
+  it("defaults to 90 days and reuses the audit target contract", () => {
+    expect(parseRetentionArgs(["--remote", "--json", "--limit", "5"])).toEqual<StorageAuditArgs>({
+      mode: "remote", json: true, days: 90, limit: 5,
+    });
+    expect(() => parseRetentionArgs([])).toThrow(/exactly one of --local or --remote/);
+  });
+
+  it.each(["--delete", "--apply", "--force", "--write", "--purge", "--prune"])(
+    "refuses destructive %s before any query",
+    (flag) => {
+      expect(() => parseRetentionArgs(["--local", flag])).toThrow(/read-only/);
+    },
+  );
+});
+
+describe("retention candidates", () => {
+  it("selects only old superseded revisions of published articles", async () => {
+    const db = setup();
+    insertArticle(db, "article");
+    for (const id of ["s-old", "s-new", "s-current", "s-reviewed"]) {
+      insertSnapshot(db, { id, articleId: "article", fetchedAt: daysAgo(1) });
+    }
+    insertRevision(db, { id: "old", articleId: "article", snapshotId: "s-old", status: "draft", createdAt: daysAgo(50) });
+    insertRevision(db, { id: "new", articleId: "article", snapshotId: "s-new", status: "draft", createdAt: daysAgo(2) });
+    insertRevision(db, { id: "current", articleId: "article", snapshotId: "s-current", status: "published", createdAt: daysAgo(50) });
+    insertRevision(db, { id: "reviewed", articleId: "article", snapshotId: "s-reviewed", status: "approved", createdAt: daysAgo(50) });
+    db.sqlite.prepare("UPDATE articles SET published_revision_id = 'current' WHERE id = 'article'").run();
+    db.sqlite.prepare(
+      "INSERT INTO reviews (id, revision_id, decision, reviewer) VALUES ('review', 'reviewed', 'approved', 'owner')",
+    ).run();
+    insertArticle(db, "draft-article", "review");
+    insertRevision(db, { id: "unpublished", articleId: "draft-article", snapshotId: "s-old", status: "draft", createdAt: daysAgo(50) });
+
+    const result = await retention(db);
+    const revisions = result.categories.find((item) => item.category === "explanation_revisions")!;
+    expect(revisions).toMatchObject({ candidates: 1, skipped: 0 });
+    expect(result.sample.filter((row) => row.category === "explanation_revisions").map((row) => row.id)).toEqual(["old"]);
+    expect(JSON.stringify(result)).not.toContain("content_json");
+  });
+
+  it("keeps snapshots referenced by a revision and snapshots newer than the cutoff", async () => {
+    const db = setup();
+    insertArticle(db, "article");
+    insertSnapshot(db, { id: "old", articleId: "article", fetchedAt: daysAgo(50) });
+    insertSnapshot(db, { id: "new", articleId: "article", fetchedAt: daysAgo(1) });
+    insertRevision(db, { id: "revision", articleId: "article", snapshotId: "old", status: "draft", createdAt: daysAgo(50) });
+    db.sqlite.prepare("UPDATE articles SET published_revision_id = 'revision' WHERE id = 'article'").run();
+
+    const result = await retention(db);
+    expect(result.categories[0]).toMatchObject({ category: "article_snapshots", candidates: 0, skipped: 0 });
+    expect(result.sample.some((row) => row.category === "article_snapshots")).toBe(false);
+  });
+
+  it("selects only done or failed jobs older than the cutoff", async () => {
+    const db = setup();
+    insertArticle(db, "article");
+    insertJob(db, { id: "done-old", articleId: "article", state: "done", updatedAt: daysAgo(50) });
+    insertJob(db, { id: "failed-old", articleId: "article", state: "failed", updatedAt: daysAgo(40) });
+    insertJob(db, { id: "done-new", articleId: "article", state: "done", updatedAt: daysAgo(2) });
+    insertJob(db, { id: "pending-old", articleId: "article", state: "pending", updatedAt: daysAgo(50) });
+    insertJob(db, { id: "running-old", articleId: "article", state: "running", updatedAt: daysAgo(50) });
+
+    const result = await retention(db);
+    const jobs = result.categories.find((item) => item.category === "jobs")!;
+    expect(jobs).toMatchObject({ candidates: 2, skipped: 0 });
+    expect(result.sample.map((row) => row.id)).toEqual(["done-old", "failed-old"]);
+  });
+
+  it("buckets missing or malformed timestamps as skipped, never candidates", async () => {
+    const db = setup();
+    insertArticle(db, "article");
+    insertSnapshot(db, { id: "malformed-snapshot", articleId: "article", fetchedAt: "not-a-timestamp" });
+    insertSnapshot(db, { id: "newest-snapshot", articleId: "article", fetchedAt: daysAgo(1) });
+    insertRevision(db, { id: "malformed-revision", articleId: "article", snapshotId: "newest-snapshot", status: "draft", createdAt: "not-a-timestamp" });
+    insertJob(db, { id: "malformed-job", articleId: "article", state: "done", updatedAt: "" });
+
+    const result = await retention(db);
+    expect(result.categories).toEqual([
+      { category: "article_snapshots", candidates: 0, payloadBytes: 0, skipped: 1 },
+      { category: "explanation_revisions", candidates: 0, payloadBytes: 0, skipped: 1 },
+      { category: "jobs", candidates: 0, payloadBytes: 0, skipped: 1 },
+    ]);
+    expect(result.totals.skipped).toBe(3);
+    expect(result.sample).toEqual([]);
+  });
+
+  it("is deterministic, oldest-first, and bounded by --limit", async () => {
+    const db = setup();
+    insertArticle(db, "article");
+    insertSnapshot(db, { id: "snapshot", articleId: "article", fetchedAt: daysAgo(50) });
+    insertSnapshot(db, { id: "newest", articleId: "article", fetchedAt: daysAgo(1) });
+    insertRevision(db, { id: "revision", articleId: "article", snapshotId: "newest", status: "draft", createdAt: daysAgo(55) });
+    insertJob(db, { id: "job", articleId: "article", state: "done", updatedAt: daysAgo(60) });
+
+    const first = await retention(db, 2);
+    const second = await retention(db, 2);
+    expect(first).toEqual(second);
+    expect(first.sample.map((row) => row.id)).toEqual(["job", "revision"]);
+    expect(first.totals).toMatchObject({ candidates: 3, skipped: 0 });
+    expect(first.sample.map((row) => row.timestamp)).toEqual([daysAgo(60), daysAgo(55)]);
+  });
+
+  it("does not write to the database", async () => {
+    const db = setup();
+    insertArticle(db, "article");
+    insertSnapshot(db, { id: "old", articleId: "article", fetchedAt: daysAgo(50) });
+    insertSnapshot(db, { id: "new", articleId: "article", fetchedAt: daysAgo(1) });
+    insertJob(db, { id: "job", articleId: "article", state: "done", updatedAt: daysAgo(50) });
+    const before = db.sqlite.prepare("SELECT * FROM jobs ORDER BY id").all();
+    const prepare = db.db.prepare.bind(db.db);
+    db.db.prepare = ((sql: string) => {
+      if (/^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER|VACUUM|ATTACH|DETACH|PRAGMA)\b/i.test(sql)) {
+        throw new Error("retention attempted a write");
+      }
+      return prepare(sql);
+    }) as typeof db.db.prepare;
+
+    await retention(db);
+    expect(db.sqlite.prepare("SELECT * FROM jobs ORDER BY id").all()).toEqual(before);
+    const source = readFileSync(new URL("../scripts/retention.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/\b(DELETE|UPDATE|DROP|INSERT|REPLACE|ALTER)\b/i);
+  });
+});
+
+describe("retention output", () => {
+  it("renders read-only JSON and human output with per-category bytes", async () => {
+    const db = setup();
+    insertArticle(db, "article");
+    insertSnapshot(db, { id: "old", articleId: "article", fetchedAt: daysAgo(50), blocksJson: "[\"source\"]" });
+    insertSnapshot(db, { id: "new", articleId: "article", fetchedAt: daysAgo(1) });
+    const result = await retention(db);
+
+    const parsed = JSON.parse(formatRetention(result, "remote", true));
+    expect(parsed).toMatchObject({
+      target: "remote",
+      readOnly: true,
+      cutoff,
+      totals: { candidates: 1, payloadBytes: 10, skipped: 0 },
+    });
+    expect(parsed.categories).toHaveLength(3);
+
+    const human = formatRetention(result, "remote", false);
+    expect(human).toContain("Target: remote (read-only)");
+    expect(human).toContain(`Cutoff: ${cutoff}`);
+    expect(human).toContain("article_snapshots: 1 candidates, 10 bytes");
+    expect(human).toMatch(/no rows were deleted/i);
+    expect(human).toContain("oldest first");
   });
 });

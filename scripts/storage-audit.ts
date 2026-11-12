@@ -28,10 +28,10 @@ function positiveInteger(flag: string, value: string | undefined, max: number): 
   return parsed;
 }
 
-export function parseStorageAuditArgs(argv: string[]): StorageAuditArgs {
+export function parseStorageAuditArgs(argv: string[], defaultDays = DEFAULT_DAYS): StorageAuditArgs {
   let mode: StorageAuditArgs["mode"] | undefined;
   let json = false;
-  let days = DEFAULT_DAYS;
+  let days = defaultDays;
   let limit = DEFAULT_LIMIT;
   const seen = new Set<string>();
 
@@ -82,7 +82,7 @@ function interpolate(sql: string, values: unknown[]): string {
   return text;
 }
 
-function createWranglerDb(mode: StorageAuditArgs["mode"]): D1Database {
+export function createWranglerDb(mode: StorageAuditArgs["mode"]): D1Database {
   function query<T>(sql: string, values: unknown[]): T[] {
     if (!/^\s*(SELECT|WITH)\b/i.test(sql)) {
       throw new Error("storage:audit only runs read-only queries.");
