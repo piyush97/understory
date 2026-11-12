@@ -13,6 +13,7 @@ The public side is read-only and fully server-rendered. Explanations are generat
 - Workers AI (`@cf/qwen/qwen3-30b-a3b-fp8`)
 - Cron Triggers for discovery
 - Workers Static Assets for CSS, client-side bookmarks, fonts, and icons
+- D1 FTS5 full-text search over published explainers at `/search`
 
 Two Workers share one D1 database:
 
@@ -68,7 +69,7 @@ curl -X POST http://localhost:8791/run/jobs \
   -H "Authorization: Bearer dev-understory-token"
 ```
 
-Workers AI is not available in local Wrangler. Generation jobs will reach the budget reservation and then fail with a binding error locally. That is expected; use the seeded, reviewed fixtures for local UI work.
+Workers AI is not available in local Wrangler. Generation jobs will reach the budget reservation and then fail with a binding error locally. That is expected; use the seeded, reviewed fixtures for local UI work. To exercise the generate job end to end locally, set `AI_STUB="true"` in `.dev.vars`: it fabricates a deterministic model response that still passes the normal validation and editorial checks. It is dev-only and must never be set on a deployed Worker.
 
 ### Local review
 
@@ -129,7 +130,7 @@ The daily budget defaults to 8,000 neurons; both production Workers configure 9,
 ## Content and editorial rules
 
 - The seed contains ten published explainers based on real engineering blog posts, plus three discovered posts on the bench. The prose was written for Understory, not copied from the publishers. Live editorial approvals may increase the published count independently of these fixtures.
-- Public seed snapshots contain two or three short quotations and the canonical link per source. Runtime extraction stores a larger, bounded private snapshot for generation/review; it is not served through public routes. No automatic retention/deletion policy is implemented. Use the read-only `storage:audit` report to preview safe cleanup candidates; deletion remains manual and separately approved.
+- Public seed snapshots contain two or three short quotations and the canonical link per source. Runtime extraction stores a larger, bounded private snapshot for generation/review; it is not served through public routes. No automatic retention/deletion policy is implemented. `npm run storage:audit` and `npm run storage:retention -- --local|--remote [--json] [--days <n>] [--limit <n>]` are both read-only: they preview snapshot, superseded-revision, and finished-job cleanup candidates. Neither deletes anything and both reject write flags; deletion remains manual and separately approved after a D1 backup.
 - Generated content must cite source ids. Citations that point nowhere are rejected before review.
 - Sources can only use URLs found in the extracted page or the original canonical URL. The validator rejects invented URLs.
 - Diagrams are graph JSON rendered to deterministic SVG. The model never supplies SVG or JavaScript.

@@ -170,6 +170,49 @@ export async function listFeedPage(
   };
 }
 
+const SEARCH_TERM = /[a-z0-9]+/g;
+// FTS5 boolean keywords are dropped so natural-language "or"/"and" do not
+// become operator-shaped terms. Everything else is quoted and prefixed.
+const FTS_KEYWORDS = new Set(["and", "or", "not", "near"]);
+
+/**
+ * Full-text search over published explainers.
+ *
+ * The query is tokenized to alphanumeric terms and each term becomes a quoted
+ * FTS5 prefix (`"http"*`). User punctuation never reaches FTS5 syntax, so
+ * operators such as OR, *, and "--" are inert. Terms shorter than two
+ * characters cannot match a prefix index and are dropped, which also makes an
+ * empty or one-character query return no rows.
+ */
+export async function searchArticles(
+  db: D1Database,
+  query: string,
+  limit = 20,
+): Promise<ArticleWithSource[]> {
+  const terms = [
+    ...new Set(
+      (query.toLowerCase().match(SEARCH_TERM) ?? []).filter(
+        (term) => term.length > 1 && !FTS_KEYWORDS.has(term),
+      ),
+    ),
+  ];
+  if (terms.length === 0) return [];
+
+  const match = terms.map((term) => `"${term}"*`).join(" AND ");
+  const result = await db
+    .prepare(
+      `${ARTICLE_SELECT}
+       WHERE a.status = 'published'
+         AND a.id IN (SELECT article_id FROM search_index WHERE search_index MATCH ?)
+       ORDER BY a.published_at DESC, a.id DESC
+       LIMIT ?`,
+    )
+    .bind(match, Math.min(Math.max(limit, 1), 50))
+    .all<ArticleSourceRow>();
+
+  return (result.results ?? []).map(mapArticleWithSource);
+}
+
 export async function listPendingArticles(
   db: D1Database,
   limit = 4,
@@ -799,6 +842,37 @@ export async function approveRevision(
   return (results[0]?.meta.changes ?? 0) > 0 ? { articleId: revision.article_id, slug: revision.slug } : null;
 }
 
+// Keeps the plain FTS5 index in step with publication. Delete-then-insert is
+// idempotent, so a correction or a repeated publish never duplicates a row.
+// Both statements are gated on this transaction's review row, so a failed or
+// stale approval cannot index anything.
+function searchIndexStatements(
+  db: D1Database,
+  articleId: string,
+  revisionId: string,
+  reviewId: string,
+): D1PreparedStatement[] {
+  return [
+    db
+      .prepare(
+        `DELETE FROM search_index
+          WHERE article_id = ? AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
+      )
+      .bind(articleId, reviewId),
+    db
+      .prepare(
+        `INSERT INTO search_index (article_id, slug, title, dek, body)
+         SELECT a.id, a.slug, COALESCE(a.context_headline, a.original_title),
+                COALESCE(a.dek, ''), r.content_json
+         FROM articles a
+         JOIN explanation_revisions r ON r.id = a.published_revision_id
+         WHERE a.id = ? AND r.id = ? AND a.status = 'published'
+           AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
+      )
+      .bind(articleId, revisionId, reviewId),
+  ];
+}
+
 function publicationStatements(
   db: D1Database,
   revisionId: string,
@@ -853,6 +927,7 @@ function publicationStatements(
             AND EXISTS (SELECT 1 FROM reviews WHERE id = ?)`,
       )
       .bind(articleId, revisionId, articleId, now, articleId, reviewId),
+    ...searchIndexStatements(db, articleId, revisionId, reviewId),
     db
       .prepare(
         `UPDATE meta SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)

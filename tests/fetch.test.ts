@@ -16,6 +16,13 @@ describe("public fetch status errors", () => {
     expect(error).toBeInstanceOf(PublicFetchError);
     expect(error).toMatchObject({ status: 429, retryAfterSeconds: 90, message: "Public fetch responded 429" });
   });
+
+  it("reports a 403 refusal with its status intact", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("forbidden", { status: 403 })));
+    const error = await fetchArticlePage("https://example.com", "test").catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PublicFetchError);
+    expect(error).toMatchObject({ status: 403, message: "Public fetch responded 403" });
+  });
   it("parses Retry-After seconds and HTTP dates", () => {
     const now = Date.parse("2026-11-09T12:00:00Z");
     expect(retryAfterSeconds("30", now)).toBe(30);

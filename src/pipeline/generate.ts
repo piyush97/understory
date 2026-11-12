@@ -7,6 +7,7 @@ import {
   type ValidationIssue,
 } from "../domain/explanation";
 import { buildGenerationMessages, VALID_CITE_IDS_TEXT, type GenerationMaterial } from "./prompt";
+import { bool } from "../shared/env";
 
 const EXPLANATION_JSON_SCHEMA = explanationSchema.toJSONSchema();
 
@@ -27,6 +28,7 @@ export async function attemptGeneration(
   model: string,
   material: GenerationMaterial,
   previous: { rawText: string; issues: ValidationIssue[] } | null,
+  env?: { AI_STUB?: string },
 ): Promise<GenerationAttempt> {
   const messages = buildGenerationMessages(material);
   if (previous) {
@@ -43,12 +45,17 @@ Issues:\n${previous.issues
     });
   }
 
-  const response = (await ai.run(model, {
-    messages,
-    max_tokens: 8_192,
-    temperature: 0.35,
-    response_format: { type: "json_schema", json_schema: EXPLANATION_JSON_SCHEMA },
-  })) as unknown;
+  // Dev-only: AI_STUB="true" fabricates a deterministic model response so the
+  // pipeline can run locally without Workers AI. Unset (or "false") keeps the
+  // real call byte-for-byte unchanged.
+  const response = bool(env?.AI_STUB)
+    ? { response: JSON.stringify(buildStubExplanation(material)) }
+    : ((await ai.run(model, {
+        messages,
+        max_tokens: 8_192,
+        temperature: 0.35,
+        response_format: { type: "json_schema", json_schema: EXPLANATION_JSON_SCHEMA },
+      })) as unknown);
 
   const output = readModelOutput(response);
   const rawText = output.text;
@@ -138,6 +145,94 @@ Issues:\n${previous.issues
     issues: [],
     rawText,
     usage: toTokenUsage(output.usage),
+  };
+}
+
+/**
+ * Deterministic stand-in for a model response. It reads only the material the
+ * prompt would have carried, so the same input always produces the same JSON.
+ */
+export function buildStubExplanation(material: GenerationMaterial): Explanation {
+  const title = (
+    material.articleTitle.trim() ||
+    material.snapshot.title.trim() ||
+    "the source article"
+  ).slice(0, 80);
+  const blockIds = material.snapshot.blocks.map((block) => block.id).slice(0, 4);
+  const evidence = blockIds.length > 0 ? blockIds.join(", ") : "none";
+
+  return {
+    schemaVersion: "1",
+    contextHeadline: `Stub explainer for ${title}`.slice(0, 90),
+    dek: "Deterministic stub prose stands in for a model response during local development.",
+    oneSentence: "This placeholder lets local workers exercise the generation path without Workers AI.",
+    tldr: [
+      "The stub returns fixed JSON so local generation runs stay reproducible.",
+      "Every cited block id below comes from the supplied source snapshot.",
+      "Production stays on the real model because the stub flag is unset.",
+    ],
+    sections: [
+      {
+        id: "stub-context",
+        title: "Context",
+        blocks: [{ type: "p", runs: [{ text: `${title} is explained here with deterministic stub text.`, cite: "s1" }] }],
+      },
+      {
+        id: "stub-mechanism",
+        title: "Mechanism",
+        blocks: [{ type: "p", runs: [{ text: `Source blocks ${evidence} back the claims in this stub.`, cite: "s1" }] }],
+      },
+      {
+        id: "stub-limits",
+        title: "Limits",
+        blocks: [
+          {
+            type: "note",
+            tone: "warning",
+            title: "Placeholder",
+            runs: [{ text: "This content exists only for local development and is never published.", cite: "s1" }],
+          },
+        ],
+      },
+    ],
+    diagram: {
+      kind: "flow",
+      title: "Stub generation flow",
+      description: "A deterministic local stub stands in for the model response.",
+      conceptual: true,
+      nodes: [
+        { id: "source", label: "Source article", cite: "s1" },
+        { id: "explainer", label: "Stub explainer", cite: "s1" },
+      ],
+      edges: [{ from: "source", to: "explainer", cite: "s1" }],
+    },
+    eli5: {
+      body: [
+        {
+          type: "p",
+          runs: [{ text: "The stub pretends to be the model so the rest of the pipeline can run." }],
+        },
+      ],
+      limit: "This only runs locally and says nothing about real model quality.",
+    },
+    tradeoffs: [
+      {
+        title: "Determinism",
+        body: "Fixed output makes local runs reproducible but unrepresentative of a real model.",
+      },
+    ],
+    whenUseful: ["Exercising the generation path during local development."],
+    caveats: [`Stub output cites source blocks: ${evidence}.`],
+    sources: [
+      {
+        id: "s1",
+        label: title,
+        url: material.articleUrl,
+        ...(blockIds.length > 0 ? { evidenceIds: blockIds } : {}),
+      },
+    ],
+    readingMinutes: 2,
+    topic: TOPIC_IDS[0] ?? "ai-infrastructure",
   };
 }
 

@@ -8,6 +8,7 @@ import {
   finalizeExplanation,
   attemptGeneration,
 } from "../src/pipeline/generate";
+import { validateExplanation } from "../src/domain/explanation";
 import { dailyNeuronBudget } from "../src/shared/env";
 import { buildGenerationMessages, type GenerationMaterial } from "../src/pipeline/prompt";
 
@@ -296,6 +297,67 @@ describe("model calls", () => {
     expect(dailyNeuronBudget("0")).toBe(0);
     expect(dailyNeuronBudget("12000")).toBe(9000);
     expect(dailyNeuronBudget("not-a-number")).toBe(8000);
+  });
+});
+
+describe("AI stub flag", () => {
+  const calls: string[] = [];
+  const spy = {
+    run: async (model: string) => {
+      calls.push(model);
+      return { response: JSON.stringify(explanation) };
+    },
+  } as unknown as Ai;
+
+  it("calls the real model when the flag is unset", async () => {
+    calls.length = 0;
+    const result = await attemptGeneration(spy, "test-model", material, null);
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual(["test-model"]);
+  });
+
+  it("calls the real model when the flag is false", async () => {
+    calls.length = 0;
+    const result = await attemptGeneration(spy, "test-model", material, null, { AI_STUB: "false" });
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual(["test-model"]);
+  });
+
+  it("skips the model and still returns validated output when the flag is true", async () => {
+    let called = false;
+    const ai = {
+      run: async () => {
+        called = true;
+        throw new Error("AI must not be called when the stub is enabled");
+      },
+    } as unknown as Ai;
+
+    const result = await attemptGeneration(ai, "test-model", material, null, { AI_STUB: "true" });
+
+    expect(called).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(result.explanation).not.toBeNull();
+    expect(validateExplanation(result.explanation)).toMatchObject({ ok: true });
+    expect(result.rawText).toContain(material.articleTitle);
+    expect(result.explanation?.sources[0]?.evidenceIds?.length).toBeGreaterThan(0);
+  });
+
+  it("is deterministic across two calls with the same input", async () => {
+    const ai = { run: async () => { throw new Error("unexpected model call"); } } as unknown as Ai;
+    const first = await attemptGeneration(ai, "test-model", material, null, { AI_STUB: "true" });
+    const second = await attemptGeneration(ai, "test-model", material, null, { AI_STUB: "true" });
+    expect(second.rawText).toBe(first.rawText);
+    expect(second.explanation).toEqual(first.explanation);
+  });
+
+  it("keeps the malformed-output error path when the flag is unset", async () => {
+    const ai = {
+      run: async () => ({ response: '{"contextHeadline": "short"' }),
+    } as unknown as Ai;
+    const result = await attemptGeneration(ai, "test-model", material, null, { AI_STUB: "false" });
+    expect(result.ok).toBe(false);
+    expect(result.issues[0]?.message).toMatch(/parseable JSON/);
+    expect(result.retryable).toBe(true);
   });
 });
 

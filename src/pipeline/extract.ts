@@ -336,13 +336,14 @@ export function toSnapshot(
   pageUrl: string,
   fetchedAt: string,
   extracted: ExtractedArticle,
+  extractorVersion: string = EXTRACTOR_VERSION,
 ): SourceSnapshot {
   return {
     articleId,
     title: extracted.title ?? "Untitled source",
     url: pageUrl,
     fetchedAt,
-    extractorVersion: EXTRACTOR_VERSION,
+    extractorVersion,
     blocks: extracted.blocks,
     wordCount: extracted.wordCount,
   };

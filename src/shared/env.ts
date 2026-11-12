@@ -5,6 +5,8 @@ export type Bindings = {
   ASSETS: Fetcher;
   PIPELINE_QUEUE: Queue<QueueMessage>;
   AI?: Ai;
+  /** Dev-only deterministic AI stub. Leave unset outside local development. */
+  AI_STUB?: string;
   ADMIN_TOKEN?: string;
   ACCESS_TEAM_DOMAIN?: string;
   ACCESS_AUD?: string;
