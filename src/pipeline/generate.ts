@@ -9,7 +9,26 @@ import {
 import { buildGenerationMessages, VALID_CITE_IDS_TEXT, type GenerationMaterial } from "./prompt";
 import { bool } from "../shared/env";
 
-const EXPLANATION_JSON_SCHEMA = explanationSchema.toJSONSchema();
+const EXPLANATION_JSON_SCHEMA = toGrammarSchema(explanationSchema.toJSONSchema());
+
+/**
+ * Workers AI compiles json_schema with xgrammar, which rejects a string that
+ * combines format, pattern, and length limits (error 8007). Keep the most
+ * specific constraint for decoding; validateExplanation still enforces the
+ * full Zod schema on the output.
+ */
+export function toGrammarSchema(node: unknown): any {
+  if (Array.isArray(node)) return node.map(toGrammarSchema);
+  if (!node || typeof node !== "object") return node;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) out[key] = toGrammarSchema(value);
+  if (typeof out.format === "string") delete out.pattern;
+  if (typeof out.format === "string" || typeof out.pattern === "string") {
+    delete out.minLength;
+    delete out.maxLength;
+  }
+  return out;
+}
 
 export type GenerationAttempt = {
   ok: boolean;
@@ -55,6 +74,8 @@ Issues:\n${previous.issues
         max_tokens: 8_192,
         temperature: 0.35,
         response_format: { type: "json_schema", json_schema: EXPLANATION_JSON_SCHEMA },
+        // Reasoning models (gemma-4) otherwise spend the whole output budget thinking.
+        chat_template_kwargs: { enable_thinking: false },
       })) as unknown);
 
   const output = readModelOutput(response);
