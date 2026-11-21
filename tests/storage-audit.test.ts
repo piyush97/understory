@@ -122,6 +122,26 @@ describe("snapshot storage report", () => {
     expect(result.note).toMatch(/not total D1 database size/i);
   });
 
+  it("looks up revisions by snapshot_id through an index instead of scanning", async () => {
+    const db = setup();
+    const seen: string[] = [];
+    const real = db.db.prepare.bind(db.db);
+    db.db.prepare = (sql: string) => {
+      seen.push(sql);
+      return real(sql);
+    };
+    await report(db);
+    const statements = seen.filter((sql) => sql.includes("r.snapshot_id = s.id"));
+    expect(statements).toHaveLength(3);
+    for (const sql of statements) {
+      const plan = (db.sqlite.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...["2026-01-01", 20].slice(0, (sql.match(/\?/g) ?? []).length)) as Array<{ detail: string }>)
+        .map((row) => row.detail);
+      expect(plan.filter((detail) => /\br\b/.test(detail))).not.toHaveLength(0);
+      expect(plan.filter((detail) => /^SCAN r\b/.test(detail))).toEqual([]);
+      expect(plan.join(" | ")).toMatch(/revisions_snapshot_idx/);
+    }
+  });
+
   it.each(["draft", "approved", "published", "rejected"])(
     "protects snapshots referenced by a %s revision",
     async (status) => {
