@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import app from "../src/web/index";
 import type { Bindings } from "../src/shared/env";
 import { approveRevision } from "../src/infrastructure/db";
@@ -158,6 +158,10 @@ describe("api v1 metering", () => {
   });
 
   it("throttles bursts above 60 requests per minute", async () => {
+    // Freeze the clock: the burst counter resets on the wall-clock minute
+    // boundary, so a slow CI runner could straddle it mid-burst and never
+    // reach the limit.
+    vi.useFakeTimers({ now: new Date("2026-01-15T00:00:05.000Z") });
     for (let index = 0; index < 60; index += 1) {
       expect((await authorized("/api/v1/usage")).status).toBe(200);
     }
@@ -165,6 +169,7 @@ describe("api v1 metering", () => {
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("Retry-After")).toBeTruthy();
     expect(await blocked.json()).toMatchObject({ error: { code: "rate_limited" } });
+    vi.useRealTimers();
   });
 });
 
