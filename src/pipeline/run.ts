@@ -49,7 +49,7 @@ import { fetchPublicText, PublicFetchError } from "../shared/fetch";
 import { pingIndexNow } from "../shared/indexnow";
 import { parseDiscoveryHtml } from "./discovery";
 import { extractArticle, fetchArticlePage, toSnapshot, type ExtractedArticle, type FetchedPage } from "./extract";
-import { attemptGeneration, neuronsFromUsage } from "./generate";
+import { attemptGeneration, DEFAULT_AI_MODEL, neuronsFromUsage } from "./generate";
 import { PROMPT_VERSION, SCHEMA_VERSION, type GenerationMaterial } from "./prompt";
 
 const ESTIMATED_NEURONS_PER_ATTEMPT = 500;
@@ -362,7 +362,7 @@ export async function runGenerateJob(env: Bindings, job: Job): Promise<RunResult
   const snapshot = await getSnapshotById(env.DB, snapshotId);
   if (!snapshot || snapshot.articleId !== article.id) return { ok: false, detail: "Snapshot no longer exists for this article." };
 
-  const model = env.AI_MODEL ?? "@cf/qwen/qwen3-30b-a3b-fp8";
+  const model = env.AI_MODEL ?? DEFAULT_AI_MODEL;
   const existingRevision = await findRevisionKey(env.DB, {
     articleId: article.id,
     snapshotId,

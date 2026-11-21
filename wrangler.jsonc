@@ -35,7 +35,7 @@
     "ENVIRONMENT": "production",
     "SITE_NAME": "Understory",
     "SITE_URL": "https://understory.piyushmehta.com",
-    "AI_MODEL": "@cf/qwen/qwen3-30b-a3b-fp8",
+    "AI_MODEL": "@cf/google/gemma-4-26b-a4b-it",
     "DAILY_NEURON_BUDGET": "9000",
     "REQUIRE_ACCESS_JWT": "true",
     "ACCESS_TEAM_DOMAIN": "https://piyushmehta.cloudflareaccess.com",

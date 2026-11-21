@@ -10,7 +10,7 @@ The public side is read-only and fully server-rendered. Explanations are generat
 - Hono with server-rendered JSX
 - D1 for articles, snapshots, revisions, reviews, jobs, and the AI budget
 - Queues for extraction and generation jobs
-- Workers AI (`@cf/qwen/qwen3-30b-a3b-fp8`)
+- Workers AI (`@cf/google/gemma-4-26b-a4b-it`)
 - Cron Triggers for discovery
 - Workers Static Assets for CSS, client-side bookmarks, fonts, and icons
 - D1 FTS5 full-text search over published explainers at `/search`

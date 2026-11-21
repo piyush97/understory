@@ -427,14 +427,15 @@ describe("citation repair", () => {
 import { neuronsFromUsage } from "../src/pipeline/generate";
 
 describe("neuronsFromUsage", () => {
-  it("prices tokens at qwen3-30b rates", () => {
-    expect(neuronsFromUsage({ inputTokens: 1_000_000, outputTokens: 0 })).toBe(4625);
-    expect(neuronsFromUsage({ inputTokens: 0, outputTokens: 1_000_000 })).toBe(30475);
-    expect(neuronsFromUsage({ inputTokens: 9_000, outputTokens: 4_000 })).toBe(164);
+  it("prices tokens at gemma-4-26b-a4b-it rates", () => {
+    expect(neuronsFromUsage({ inputTokens: 1_000_000, outputTokens: 0 })).toBe(9091);
+    expect(neuronsFromUsage({ inputTokens: 0, outputTokens: 1_000_000 })).toBe(27273);
+    expect(neuronsFromUsage({ inputTokens: 9_000, outputTokens: 4_000 })).toBe(191);
   });
   it("falls back to the estimate for models without known rates", () => {
     expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/meta/llama-unknown")).toBeNull();
-    expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/qwen/qwen3-30b-a3b-fp8")).toBe(36);
+    expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/qwen/qwen3-30b-a3b-fp8")).toBeNull();
+    expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/google/gemma-4-26b-a4b-it")).toBe(37);
   });
   it("returns null without usable counts", () => {
     expect(neuronsFromUsage(null)).toBeNull();
