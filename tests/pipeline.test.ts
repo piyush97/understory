@@ -856,6 +856,12 @@ describe("pipeline consistency", () => {
     await processJob(env, "job");
     expect(store.sqlite.prepare("SELECT state FROM jobs").get()?.state).toBe("failed");
   });
+  it("charges the neurons Workers AI reports instead of the token estimate", async () => {
+    await generateJob();
+    mocks.generate.mockResolvedValue({ ok: false, explanation: null, issues: [{ path: "headline", message: "too long" }], rawText: "{}", usage: { inputTokens: 9000, outputTokens: 4000, neurons: 123.4 } });
+    await processJob(env, "job");
+    expect(store.sqlite.prepare("SELECT used_neurons, reserved_neurons FROM ai_budget").get()).toEqual({ used_neurons: 248, reserved_neurons: 0 });
+  });
   it("looks up known discovery posts in one query", async () => {
     const post = { url: "https://example.com/post", publishedAt: new Date().toISOString(), sourceSiteUrl: "https://example.com", title: "Test article", sourceName: "Source" };
     mocks.discovery.mockReturnValue(Array.from({ length: 30 }, () => post));
