@@ -570,15 +570,21 @@ function toTokenUsage(
   };
 }
 
-// Neurons per million tokens, from Workers AI pricing. Unknown models fall
-// back to the caller's conservative estimate.
+// @cf/qwen/qwen3-30b-a3b-fp8 was deprecated on 2026-11-20 (Workers AI error 5028).
+// Gemma 4 supports response_format json_schema and is not deprecated:
+// https://developers.cloudflare.com/workers-ai/models/gemma-4-26b-a4b-it/
+export const DEFAULT_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
+
+// Neurons per million tokens, from Workers AI pricing:
+// https://developers.cloudflare.com/workers-ai/platform/pricing/
+// Unknown models fall back to the caller's conservative estimate.
 const NEURON_RATES: Record<string, { input: number; output: number }> = {
-  "@cf/qwen/qwen3-30b-a3b-fp8": { input: 4625, output: 30475 },
+  "@cf/google/gemma-4-26b-a4b-it": { input: 9091, output: 27273 },
 };
 
 export function neuronsFromUsage(
   usage: GenerationAttempt["usage"],
-  model = "@cf/qwen/qwen3-30b-a3b-fp8",
+  model = DEFAULT_AI_MODEL,
 ): number | null {
   const rate = NEURON_RATES[model];
   if (!rate || !usage || (usage.inputTokens === null && usage.outputTokens === null)) return null;
