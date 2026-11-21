@@ -142,6 +142,16 @@ describe("model calls", () => {
     expect(result.usage).toEqual({ inputTokens: 1200, outputTokens: 800 });
   });
 
+  it("keeps the neurons count Workers AI reports and ignores invalid ones", async () => {
+    const run = (neurons: unknown) => attemptGeneration({
+      run: async () => ({ response: JSON.stringify(explanation), usage: { prompt_tokens: 1200, completion_tokens: 800, neurons } }),
+    } as unknown as Ai, "test-model", material, null);
+    expect((await run(41.5)).usage).toEqual({ inputTokens: 1200, outputTokens: 800, neurons: 41.5 });
+    for (const invalid of [-1, Number.NaN, "41", null]) {
+      expect((await run(invalid)).usage).toEqual({ inputTokens: 1200, outputTokens: 800 });
+    }
+  });
+
   it("requests a response that follows the explanation schema", async () => {
     let request: Record<string, unknown> | undefined;
     const ai = {
@@ -451,6 +461,11 @@ describe("neuronsFromUsage", () => {
     expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/meta/llama-unknown")).toBeNull();
     expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/qwen/qwen3-30b-a3b-fp8")).toBeNull();
     expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/google/gemma-4-26b-a4b-it")).toBe(37);
+  });
+  it("prefers the neurons count Workers AI reports over the rate table", () => {
+    expect(neuronsFromUsage({ inputTokens: 9_000, outputTokens: 4_000, neurons: 120.2 })).toBe(121);
+    expect(neuronsFromUsage({ inputTokens: null, outputTokens: null, neurons: 0 })).toBe(0);
+    expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000, neurons: 7 }, "@cf/meta/llama-unknown")).toBe(7);
   });
   it("returns null without usable counts", () => {
     expect(neuronsFromUsage(null)).toBeNull();

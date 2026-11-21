@@ -30,12 +30,15 @@ export function toGrammarSchema(node: unknown): any {
   return out;
 }
 
+/** neurons is the model's own billed count, present only when Workers AI reports it. */
+type TokenUsage = { inputTokens: number | null; outputTokens: number | null; neurons?: number };
+
 export type GenerationAttempt = {
   ok: boolean;
   explanation: Explanation | null;
   issues: ValidationIssue[];
   rawText: string;
-  usage: { inputTokens: number | null; outputTokens: number | null } | null;
+  usage: TokenUsage | null;
   /** Malformed or empty output is sampling noise; a later fresh attempt can succeed. */
   retryable?: boolean;
   /** The output hit the token limit: re-prompting with the same max_tokens cannot fix it. */
@@ -425,7 +428,7 @@ export function extractJsonObject(raw: string): unknown {
   }
 }
 
-type ModelUsage = { prompt_tokens?: number; completion_tokens?: number };
+type ModelUsage = { prompt_tokens?: number; completion_tokens?: number; neurons?: number };
 
 type ModelOutput = {
   text: string;
@@ -556,8 +559,12 @@ function readUsage(value: unknown): ModelUsage | null {
   const promptTokens = typeof record.prompt_tokens === "number" ? record.prompt_tokens : undefined;
   const completionTokens =
     typeof record.completion_tokens === "number" ? record.completion_tokens : undefined;
-  if (promptTokens === undefined && completionTokens === undefined) return null;
-  return { prompt_tokens: promptTokens, completion_tokens: completionTokens };
+  const neurons =
+    typeof record.neurons === "number" && Number.isFinite(record.neurons) && record.neurons >= 0
+      ? record.neurons
+      : undefined;
+  if (promptTokens === undefined && completionTokens === undefined && neurons === undefined) return null;
+  return { prompt_tokens: promptTokens, completion_tokens: completionTokens, neurons };
 }
 
 function withFinishIssue(issues: ValidationIssue[], finishReason: string | null): ValidationIssue[] {
@@ -581,13 +588,12 @@ function emptyOutputMessage(output: ModelOutput): string {
   return "Model did not return any text.";
 }
 
-function toTokenUsage(
-  usage: ModelUsage | null,
-): { inputTokens: number | null; outputTokens: number | null } | null {
+function toTokenUsage(usage: ModelUsage | null): TokenUsage | null {
   if (!usage) return null;
   return {
     inputTokens: usage.prompt_tokens ?? null,
     outputTokens: usage.completion_tokens ?? null,
+    ...(usage.neurons === undefined ? {} : { neurons: usage.neurons }),
   };
 }
 
@@ -598,7 +604,8 @@ export const DEFAULT_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 
 // Neurons per million tokens, from Workers AI pricing:
 // https://developers.cloudflare.com/workers-ai/platform/pricing/
-// Unknown models fall back to the caller's conservative estimate.
+// A neurons count reported by Workers AI wins over the rate table. Unknown
+// models without one fall back to the caller's conservative estimate.
 const NEURON_RATES: Record<string, { input: number; output: number }> = {
   "@cf/google/gemma-4-26b-a4b-it": { input: 9091, output: 27273 },
 };
@@ -607,6 +614,7 @@ export function neuronsFromUsage(
   usage: GenerationAttempt["usage"],
   model = DEFAULT_AI_MODEL,
 ): number | null {
+  if (usage?.neurons !== undefined) return Math.ceil(usage.neurons);
   const rate = NEURON_RATES[model];
   if (!rate || !usage || (usage.inputTokens === null && usage.outputTokens === null)) return null;
   return Math.ceil(((usage.inputTokens ?? 0) * rate.input + (usage.outputTokens ?? 0) * rate.output) / 1_000_000);
