@@ -57,7 +57,7 @@ Failed generate jobs by first matching rule in `last_error`:
 How to read the table:
 
 - "Unknown citation id": the model cited excerpt block ids (`b1`, `b79`) instead of source ids (`s1`). The repair strips unknown cites, so these jobs still failed on another schema issue. `last_error` is cut at 700 characters and lists the pre-repair issues, so the remaining issue is often hidden.
-- All 12 "Workers AI error" rows are `5028: @cf/qwen/qwen3-30b-a3b-fp8 was deprecated on 2026-11-20`. The pipeline model needs replacing before generation can resume.
+- All 12 "Workers AI error" rows are `5028: @cf/qwen/qwen3-30b-a3b-fp8 was deprecated on 2026-11-20`. After this snapshot the pipeline moved to `@cf/google/gemma-4-26b-a4b-it` ([#24](https://github.com/piyush97/understory/pull/24), [#25](https://github.com/piyush97/understory/pull/25)).
 
 ## AI budget (query 6)
 
