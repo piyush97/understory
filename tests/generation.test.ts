@@ -165,6 +165,18 @@ describe("model calls", () => {
       | undefined;
     expect(format?.type).toBe("json_schema");
     expect(format?.json_schema?.properties?.sections).toBeTruthy();
+    expect(request?.chat_template_kwargs).toEqual({ enable_thinking: false });
+    // xgrammar (Workers AI error 8007) rejects format, pattern, and length limits on one string.
+    const conflicts: string[] = [];
+    const walk = (node: unknown, path: string) => {
+      if (!node || typeof node !== "object") return;
+      const n = node as Record<string, unknown>;
+      const kinds = ["format", "pattern"].filter((k) => k in n).length + ("minLength" in n || "maxLength" in n ? 1 : 0);
+      if (kinds > 1) conflicts.push(path);
+      for (const [key, value] of Object.entries(n)) walk(value, `${path}/${key}`);
+    };
+    walk(format?.json_schema, "#");
+    expect(conflicts).toEqual([]);
   });
 
   it("reads OpenAI-style chat completion choices", async () => {
@@ -431,6 +443,9 @@ describe("neuronsFromUsage", () => {
     expect(neuronsFromUsage({ inputTokens: 1_000_000, outputTokens: 0 })).toBe(9091);
     expect(neuronsFromUsage({ inputTokens: 0, outputTokens: 1_000_000 })).toBe(27273);
     expect(neuronsFromUsage({ inputTokens: 9_000, outputTokens: 4_000 })).toBe(191);
+  });
+  it("prices tokens at gemma-4-26b rates", () => {
+    expect(neuronsFromUsage({ inputTokens: 4_633, outputTokens: 1_798 }, "@cf/google/gemma-4-26b-a4b-it")).toBe(92);
   });
   it("falls back to the estimate for models without known rates", () => {
     expect(neuronsFromUsage({ inputTokens: 1000, outputTokens: 1000 }, "@cf/meta/llama-unknown")).toBeNull();
